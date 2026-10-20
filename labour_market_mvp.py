@@ -216,7 +216,18 @@ def reset_scenario():
     )
     st.session_state.results = None
 
+# Initialize session state on first app load
+if "scenario_rows" not in st.session_state:
+    st.session_state["scenario_rows"] = pd.DataFrame(
+        columns=[
+            "PROV",
+            "IOIC",
+            "investment_millions",
+        ]
+    )
 
+if "results" not in st.session_state:
+    st.session_state["results"] = None
 # ---------- Header ----------
 st.title("Major Projects Labour-Market Requirements")
 st.caption(
