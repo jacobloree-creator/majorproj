@@ -241,7 +241,7 @@ with st.expander("Method and interpretation", expanded=False):
 # LOAD COEFFICIENT DATA
 # ============================================================
 
-DATA_FILE = "coefficients.xlsx"
+DATA_FILE = "io_noc_coefficients.xlsx"
 
 @st.cache_data
 def load_data():
