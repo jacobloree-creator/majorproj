@@ -386,7 +386,7 @@ with supply_tab:
             "employed": st.column_config.NumberColumn("Employed", format="%.0f"),
             "unemployed": st.column_config.NumberColumn("Unemployed", format="%.0f"),
             "unemprate": st.column_config.NumberColumn("Unemployment rate", format="%.2f"),
-            "earn_mean": st.column_config.Numbercolumn('Average hourly wage", format="%.2"),
+            "earn_mean": st.column_config.Numbercolumn("Average hourly wage", format="%.2"),
             "highageshare": st.column_config.NumberColumn("High-age share", format="%.2f"),
             "supply_employment_change_pct": st.column_config.NumberColumn("Demand / employed (%)", format="%.2f"),
         },
