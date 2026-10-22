@@ -312,9 +312,15 @@ if (
 st.sidebar.header("2. Add investment shocks")
 provinces = sorted(industry_data["PROV"].dropna().astype(str).unique())
 selected_prov = st.sidebar.selectbox("Province", provinces)
-valid_ioics = sorted(
-    industry_data.loc[industry_data["PROV"].eq(selected_prov), "IOIC"]
-    .dropna().astype(str).unique()
+valid_ioics = (
+    industry_data.loc[
+        industry_data["PROV"].eq(selected_prov),
+        "IOIC"
+    ]
+    .dropna()
+    .astype(str)
+    .drop_duplicates()
+    .tolist()
 )
 selected_ioic = st.sidebar.selectbox("IOIC industry", valid_ioics)
 investment_m = st.sidebar.number_input(
