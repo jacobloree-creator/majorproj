@@ -15,6 +15,7 @@ APP_DIR = Path(__file__).parent
 DEMAND_FILE = APP_DIR / "io_noc_coefficients.xlsx"
 LABOUR_FILE = APP_DIR / "unemployment.xlsx"
 DEMOGRAPHICS_FILE = APP_DIR / "demographics.xlsx"
+WAGES_FILE = APP_DIR / "wages.xlsx"
 
 REQUIRED_DEMAND_COLS = [
     "IOIC", "PROV", "NOC3DIG", "emp", "totalemp_ind", "occshare",
@@ -26,6 +27,8 @@ REQUIRED_DEMAND_COLS = [
 ]
 REQUIRED_LABOUR_COLS = ["PROV", "NOC3DIG", "employed", "unemployed", "unemprate"]
 REQUIRED_DEMOGRAPHICS_COLS = ["PROV", "NOC3DIG", "highageshare"]
+REQUIRED_WAGE_COLS = [
+    "PROV", "NOC3DIG", "earn_mean",]
 NUMERIC_DEMAND_COLS = [c for c in REQUIRED_DEMAND_COLS if c not in {"IOIC", "PROV", "NOC3DIG"}]
 MULTIPLIER_COLS = [
     "direct_all_wage", "indirect_all_wage", "induced_all_wage",
@@ -47,7 +50,8 @@ def load_data():
     demand = pd.read_excel(DEMAND_FILE, engine="openpyxl")
     labour = pd.read_excel(LABOUR_FILE, engine="openpyxl")
     demographics = pd.read_excel(DEMOGRAPHICS_FILE, engine="openpyxl")
-    return demand, labour, demographics
+    wages = pd.read_excel(WAGES_FILE, engine="openpyxl")
+    return demand, labour, demographics, wages
 
 
 def require_columns(frame, required, label):
@@ -93,9 +97,10 @@ def prepare_coefficients(raw):
     return df, industry_data, occ_data, bad_shares, inconsistent
 
 
-def prepare_supply(labour, demographics):
+def prepare_supply(labour, demographics, wages):
     require_columns(labour, REQUIRED_LABOUR_COLS, LABOUR_FILE.name)
     require_columns(demographics, REQUIRED_DEMOGRAPHICS_COLS, DEMOGRAPHICS_FILE.name)
+    require_columns(wages, REQUIRED_WAGES_COLSm WAGE_FILE.name)
 
     labour = clean_keys(labour)
     demographics = clean_keys(demographics)
@@ -251,9 +256,9 @@ def reset_scenario():
 
 # ---------- Load and prepare ----------
 try:
-    raw, labour, demographics = load_data()
+    raw, labour, demographics, wages = load_data()
     df, industry_data, occ_data, bad_shares, inconsistent_multipliers = prepare_coefficients(raw)
-    supply_data, unmatched_supply = prepare_supply(labour, demographics)
+    supply_data, unmatched_supply = prepare_supply(labour, demographics, wages)
 except Exception as exc:
     st.error(f"Could not prepare the data: {exc}")
     st.stop()
@@ -369,7 +374,7 @@ with occupation_tab:
 
 with supply_tab:
     supply_view = results["occupation"][[
-        "PROV", "NOC3DIG", "new_jobs", "employed", "unemployed", "unemprate", "highageshare",
+        "PROV", "NOC3DIG", "new_jobs", "employed", "unemployed", "unemprate", "earn_mean", "highageshare",
         "supply_employment_change_pct"
     ]].copy()
     st.dataframe(
@@ -381,6 +386,7 @@ with supply_tab:
             "employed": st.column_config.NumberColumn("Employed", format="%.0f"),
             "unemployed": st.column_config.NumberColumn("Unemployed", format="%.0f"),
             "unemprate": st.column_config.NumberColumn("Unemployment rate", format="%.2f"),
+            "earn_mean": st.column_config.Numbercolumn('Average hourly wage", format="%.2"),
             "highageshare": st.column_config.NumberColumn("High-age share", format="%.2f"),
             "supply_employment_change_pct": st.column_config.NumberColumn("Demand / employed (%)", format="%.2f"),
         },
