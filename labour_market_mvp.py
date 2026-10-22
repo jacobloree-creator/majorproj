@@ -99,7 +99,7 @@ def prepare_coefficients(raw):
 def prepare_supply(labour, demographics, wages):
     require_columns(labour, REQUIRED_LABOUR_COLS, LABOUR_FILE.name)
     require_columns(demographics, REQUIRED_DEMOGRAPHICS_COLS, DEMOGRAPHICS_FILE.name)
-    require_columns(wages, REQUIRED_WAGES_COLS, WAGE_FILE.name)
+    require_columns(wages, REQUIRED_WAGE_COLS, WAGE_FILE.name)
 
     labour = clean_keys(labour)
     demographics = clean_keys(demographics)
