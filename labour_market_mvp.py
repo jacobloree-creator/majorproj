@@ -195,6 +195,12 @@ def run_scenario(scenario, industry_data, occ_data, supply_data, geography="with
         .groupby(["PROV", "NOC3DIG"], as_index=False)
         .agg(new_jobs=("new_jobs", "sum"), totalemp_occ=("totalemp_occ", "first"))
     )
+
+    # Remove occupations with no new direct jobs
+    occupation = occupation.loc[
+        occupation["new_jobs"] > 0
+    ].copy()
+
     occupation["employment_change_pct"] = np.where(
         occupation["totalemp_occ"].gt(0),
         occupation["new_jobs"] / occupation["totalemp_occ"] * 100,
