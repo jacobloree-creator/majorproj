@@ -103,7 +103,8 @@ def prepare_supply(labour, demographics):
     labour[["employed", "unemployed", "unemprate"]] = labour[
         ["employed", "unemployed", "unemprate"]
     ].apply(pd.to_numeric, errors="coerce")
-    demographics["highageshare"] = pd.to_numeric(demographics["highageshare"], errors="coerce")
+    labour["unemprate"] = labour["unemprate"] * 100
+    demographics["highageshare"] = pd.to_numeric(demographics["highageshare"], errors="coerce") * 100
 
     if labour.duplicated(["PROV", "NOC3DIG"]).any():
         dupes = labour.loc[labour.duplicated(["PROV", "NOC3DIG"], keep=False), ["PROV", "NOC3DIG"]]
