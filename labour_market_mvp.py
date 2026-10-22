@@ -96,37 +96,131 @@ def prepare_coefficients(raw):
     return df, industry_data, occ_data, bad_shares, inconsistent
 
 
-def prepare_supply(labour, demographics, wages):
-    require_columns(labour, REQUIRED_LABOUR_COLS, LABOUR_FILE.name)
-    require_columns(demographics, REQUIRED_DEMOGRAPHICS_COLS, DEMOGRAPHICS_FILE.name)
-    require_columns(wages, REQUIRED_WAGE_COLS, WAGES_FILE.name)
+def prepare_supply(
+    labour,
+    demographics,
+    wages
+):
 
+    # Check required columns
+    require_columns(
+        labour,
+        REQUIRED_LABOUR_COLS,
+        LABOUR_FILE.name
+    )
+
+    require_columns(
+        demographics,
+        REQUIRED_DEMOGRAPHICS_COLS,
+        DEMOGRAPHICS_FILE.name
+    )
+
+    require_columns(
+        wages,
+        REQUIRED_WAGE_COLS,
+        WAGES_FILE.name
+    )
+
+    # Clean merge keys
     labour = clean_keys(labour)
     demographics = clean_keys(demographics)
+    wages = clean_keys(wages)
 
-    labour[["employed", "unemployed", "unemprate"]] = labour[
-        ["employed", "unemployed", "unemprate"]
-    ].apply(pd.to_numeric, errors="coerce")
-    labour["unemprate"] = labour["unemprate"] * 100
-    demographics["highageshare"] = pd.to_numeric(demographics["highageshare"], errors="coerce") * 100
+    # Convert variables to numeric
+    labour[
+        [
+            "employed",
+            "unemployed",
+            "unemprate",
+        ]
+    ] = labour[
+        [
+            "employed",
+            "unemployed",
+            "unemprate",
+        ]
+    ].apply(
+        pd.to_numeric,
+        errors="coerce"
+    )
 
-    if labour.duplicated(["PROV", "NOC3DIG"]).any():
-        dupes = labour.loc[labour.duplicated(["PROV", "NOC3DIG"], keep=False), ["PROV", "NOC3DIG"]]
-        raise ValueError("Duplicate PROV x NOC3DIG rows in unemployment.xlsx:\n" + dupes.to_string(index=False))
-    if demographics.duplicated(["PROV", "NOC3DIG"]).any():
-        dupes = demographics.loc[demographics.duplicated(["PROV", "NOC3DIG"], keep=False), ["PROV", "NOC3DIG"]]
-        raise ValueError("Duplicate PROV x NOC3DIG rows in demographics.xlsx:\n" + dupes.to_string(index=False))
+    demographics["highageshare"] = pd.to_numeric(
+        demographics["highageshare"],
+        errors="coerce"
+    )
 
+    wages["earn_mean"] = pd.to_numeric(
+        wages["earn_mean"],
+        errors="coerce"
+    )
+
+    # Convert proportions to percentages
+    labour["unemprate"] = (
+        labour["unemprate"] * 100
+    )
+
+    demographics["highageshare"] = (
+        demographics["highageshare"] * 100
+    )
+
+    # Check for duplicate PROV x NOC cells
+    for data, name in [
+        (labour, "unemployment.xlsx"),
+        (demographics, "demographics.xlsx"),
+        (wages, "wages.xlsx"),
+    ]:
+
+        duplicates = data.duplicated(
+            ["PROV", "NOC3DIG"]
+        )
+
+        if duplicates.any():
+
+            dupes = data.loc[
+                data.duplicated(
+                    ["PROV", "NOC3DIG"],
+                    keep=False
+                ),
+                [
+                    "PROV",
+                    "NOC3DIG",
+                ]
+            ]
+
+            raise ValueError(
+                f"Duplicate PROV x NOC3DIG rows in {name}:\n"
+                + dupes.to_string(index=False)
+            )
+
+    # Merge unemployment + demographics
     supply = labour.merge(
         demographics,
-        on=["PROV", "NOC3DIG"],
+        on=[
+            "PROV",
+            "NOC3DIG"
+        ],
         how="outer",
-        validate="one_to_one",
-        indicator=True,
+        validate="one_to_one"
     )
-    unmatched_supply = supply.loc[supply["_merge"].ne("both")].copy()
-    supply = supply.drop(columns="_merge")
-    return supply, unmatched_supply
+
+    # Merge wages
+    supply = supply.merge(
+        wages[
+            [
+                "PROV",
+                "NOC3DIG",
+                "earn_mean"
+            ]
+        ],
+        on=[
+            "PROV",
+            "NOC3DIG"
+        ],
+        how="outer",
+        validate="one_to_one"
+    )
+
+    return supply
 
 
 def run_scenario(scenario, industry_data, occ_data, supply_data, geography="within"):
