@@ -27,8 +27,7 @@ REQUIRED_DEMAND_COLS = [
 ]
 REQUIRED_LABOUR_COLS = ["PROV", "NOC3DIG", "employed", "unemployed", "unemprate"]
 REQUIRED_DEMOGRAPHICS_COLS = ["PROV", "NOC3DIG", "highageshare"]
-REQUIRED_WAGE_COLS = [
-    "PROV", "NOC3DIG", "earn_mean",]
+REQUIRED_WAGE_COLS = ["PROV", "NOC3DIG", "earn_mean",]
 NUMERIC_DEMAND_COLS = [c for c in REQUIRED_DEMAND_COLS if c not in {"IOIC", "PROV", "NOC3DIG"}]
 MULTIPLIER_COLS = [
     "direct_all_wage", "indirect_all_wage", "induced_all_wage",
