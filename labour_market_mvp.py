@@ -351,7 +351,11 @@ def reset_scenario():
 try:
     raw, labour, demographics, wages = load_data()
     df, industry_data, occ_data, bad_shares, inconsistent_multipliers = prepare_coefficients(raw)
-    supply_data, unmatched_supply = prepare_supply(labour, demographics, wages)
+    supply_data = prepare_supply(
+        labour,
+        demographics,
+        wages
+    )
 except Exception as exc:
     st.error(f"Could not prepare the data: {exc}")
     st.stop()
