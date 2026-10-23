@@ -58,7 +58,7 @@ def load_data():
     wages = pd.read_excel(WAGES_FILE, engine="openpyxl")
     noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
     vacancies = pd.read_excel(VACANCIES_FILE, engine="openpyxl")
-    return demand, labour, demographics, wages, noc_titles
+    return demand, labour, demographics, wages, noc_titles, vacancies
 
 
 def require_columns(frame, required, label):
@@ -107,7 +107,8 @@ def prepare_coefficients(raw):
 def prepare_supply(
     labour,
     demographics,
-    wages
+    wages,
+    vacancies
 ):
 
     # Check required columns
@@ -127,6 +128,12 @@ def prepare_supply(
         wages,
         REQUIRED_WAGE_COLS,
         WAGES_FILE.name
+    )
+
+    require_columns(
+        vacancies,
+        REQUIRED_VACANCY_COLS,
+        VACANCIES_FILE.name
     )
 
     # Clean merge keys
@@ -429,12 +436,13 @@ def reset_scenario():
 
 # ---------- Load and prepare ----------
 try:
-    raw, labour, demographics, wages, noc_titles = load_data()
+    raw, labour, demographics, wages, noc_titles, vacancies = load_data()
     df, industry_data, occ_data, bad_shares, inconsistent_multipliers = prepare_coefficients(raw)
     supply_data = prepare_supply(
         labour,
         demographics,
-        wages
+        wages,
+        vacancies,
     )
     noc_titles = prepare_noc_titles(
         noc_titles
@@ -609,7 +617,7 @@ with occupation_tab:
 
 with supply_tab:
     supply_view = results["occupation"][[
-        "PROV", "NOC3DIG", "title", "new_jobs", "employed", "unemployed", "unemprate", "earn_mean", "highageshare",
+        "PROV", "NOC3DIG", "title", "new_jobs", "employed", "unemployed", "unemprate", "vacancies", "vacancy_rate", "earn_mean", "highageshare",
         "supply_employment_change_pct"
     ]].copy()
     st.dataframe(
@@ -621,6 +629,8 @@ with supply_tab:
             "employed": st.column_config.NumberColumn("Employed", format="%.0f"),
             "unemployed": st.column_config.NumberColumn("Unemployed", format="%.0f"),
             "unemprate": st.column_config.NumberColumn("Unemployment rate (%)", format="%.2f"),
+            "vacancies": st.column_config.NumberColumn("Vacancies", format="%.0f"),
+            "vacancy_rate": st.column_config.NumberColumn("Vacancy rate (%), format"%.2f"),
             "earn_mean": st.column_config.NumberColumn("Average hourly wage", format="$%.2"),
             "highageshare": st.column_config.NumberColumn("High-age share (%)", format="%.2f"),
             "supply_employment_change_pct": st.column_config.NumberColumn("Demand / employed (%)", format="%.2f"),
