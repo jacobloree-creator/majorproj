@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import altair as alt
 
 st.set_page_config(
     page_title="Major Projects Labour-Market Requirements",
@@ -516,11 +517,66 @@ with occupation_tab:
     show = occ[["PROV", "NOC3DIG", "title", "new_jobs", "totalemp_occ", "employment_change_pct", "pressure_rank"]]
     st.dataframe(show, hide_index=True, width="stretch")
     chart = occ.dropna(subset=["employment_change_pct"]).nlargest(15, "employment_change_pct").copy()
-    chart["label"] = (chart["PROV"] + " | " + chart["title"].fillna("NOC " + chart["NOC3DIG"].astype(str)
+    chart["label"] = (
+        chart["PROV"]
+        + " | "
+        + chart["title"].fillna(
+            "NOC " + chart["NOC3DIG"].astype(str)
+        )
     )
-)
+
     if not chart.empty:
-        st.bar_chart(chart.set_index("label")[["employment_change_pct"]])
+
+        bar_chart = (
+            alt.Chart(chart)
+            .mark_bar()
+            .encode(
+                x=alt.X(
+                    "employment_change_pct:Q",
+                    title="Increase in occupational employment demand (%)"
+                ),
+                y=alt.Y(
+                    "label:N",
+                    sort="-x",
+                    title=None,
+                    axis=alt.Axis(
+                        labelLimit=500
+                    )
+                ),
+                tooltip=[
+                    alt.Tooltip(
+                        "PROV:N",
+                        title="Province"
+                    ),
+                    alt.Tooltip(
+                        "NOC3DIG:N",
+                        title="NOC"
+                    ),
+                    alt.Tooltip(
+                        "title:N",
+                        title="Occupation"
+                    ),
+                    alt.Tooltip(
+                        "new_jobs:Q",
+                        title="New direct jobs",
+                        format=",.0f"
+                    ),
+                    alt.Tooltip(
+                        "employment_change_pct:Q",
+                        title="Employment pressure (%)",
+                        format=".2f"
+                    )
+                ]
+            )
+            .properties(
+                height=500
+            )
+        )
+
+        st.altair_chart(
+            bar_chart,
+            width="stretch"
+        )
 
 with supply_tab:
     supply_view = results["occupation"][[
