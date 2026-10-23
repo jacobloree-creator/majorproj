@@ -16,6 +16,7 @@ DEMAND_FILE = APP_DIR / "io_noc_coefficients.xlsx"
 LABOUR_FILE = APP_DIR / "unemployment.xlsx"
 DEMOGRAPHICS_FILE = APP_DIR / "demographics.xlsx"
 WAGES_FILE = APP_DIR / "wages.xlsx"
+NOC_TITLES_FILE = APP_DIR / "noc_titles.xlsx"
 
 REQUIRED_DEMAND_COLS = [
     "IOIC", "PROV", "NOC3DIG", "emp", "totalemp_ind", "occshare",
@@ -28,6 +29,7 @@ REQUIRED_DEMAND_COLS = [
 REQUIRED_LABOUR_COLS = ["PROV", "NOC3DIG", "employed", "unemployed", "unemprate"]
 REQUIRED_DEMOGRAPHICS_COLS = ["PROV", "NOC3DIG", "highageshare"]
 REQUIRED_WAGE_COLS = ["PROV", "NOC3DIG", "earn_mean",]
+REQUIRED_NOC_TITLE_COLS = ["NOC3DIG", "title"]
 NUMERIC_DEMAND_COLS = [c for c in REQUIRED_DEMAND_COLS if c not in {"IOIC", "PROV", "NOC3DIG"}]
 MULTIPLIER_COLS = [
     "direct_all_wage", "indirect_all_wage", "induced_all_wage",
@@ -50,7 +52,8 @@ def load_data():
     labour = pd.read_excel(LABOUR_FILE, engine="openpyxl")
     demographics = pd.read_excel(DEMOGRAPHICS_FILE, engine="openpyxl")
     wages = pd.read_excel(WAGES_FILE, engine="openpyxl")
-    return demand, labour, demographics, wages
+    noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
+    return demand, labour, demographics, wages, noc_titles
 
 
 def require_columns(frame, required, label):
@@ -125,6 +128,24 @@ def prepare_supply(
     labour = clean_keys(labour)
     demographics = clean_keys(demographics)
     wages = clean_keys(wages)
+
+    require_columns(
+    noc_title,
+    REQUIRED_NOC_TITLE_COLS,
+    NOC_TITLES_FILE.name
+)
+
+noc_titles["NOC3DIG"] = (
+    noc_titles["NOC3DIG"]
+    .astype("string")
+    .str.strip()
+)
+
+noc_titles["noc_title"] = (
+    noc_titles["noc_title"]
+    .astype("string")
+    .str.strip()
+)
 
     # Convert variables to numeric
     labour[
@@ -223,7 +244,7 @@ def prepare_supply(
     return supply
 
 
-def run_scenario(scenario, industry_data, occ_data, supply_data, geography="within"):
+def run_scenario(scenario, industry_data, occ_data, supply_data, noc_titles, geography="within"):
     scenario = scenario.copy()
     for col in ["PROV", "IOIC"]:
         scenario[col] = scenario[col].astype("string").str.strip()
@@ -312,6 +333,12 @@ def run_scenario(scenario, industry_data, occ_data, supply_data, geography="with
         validate="one_to_one",
     )
 
+    occupation = occupation.merge(
+        noc_titles,
+        on="NOC3DIG",
+        how="left",
+        validate="many_to_one"
+    )
     # A second demand-pressure denominator using the independent supply-side employment estimate.
     occupation["supply_employment_change_pct"] = np.where(
         occupation["employed"].gt(0),
@@ -349,7 +376,7 @@ def reset_scenario():
 
 # ---------- Load and prepare ----------
 try:
-    raw, labour, demographics, wages = load_data()
+    raw, labour, demographics, wages, noc_titles = load_data()
     df, industry_data, occ_data, bad_shares, inconsistent_multipliers = prepare_coefficients(raw)
     supply_data = prepare_supply(
         labour,
@@ -431,7 +458,7 @@ geography = "within" if scope == "Within province" else "all"
 if st.button("Run scenario", type="primary", width="stretch"):
     try:
         st.session_state["results"] = run_scenario(
-            st.session_state["scenario_rows"], industry_data, occ_data, supply_data, geography
+            st.session_state["scenario_rows"], industry_data, occ_data, supply_data, noc_titles, geography
         )
     except Exception as exc:
         st.error(str(exc))
@@ -460,16 +487,18 @@ with industry_tab:
 
 with occupation_tab:
     occ = results["occupation"].copy()
-    show = occ[["PROV", "NOC3DIG", "new_jobs", "totalemp_occ", "employment_change_pct", "pressure_rank"]]
+    show = occ[["PROV", "NOC3DIG", "title", "new_jobs", "totalemp_occ", "employment_change_pct", "pressure_rank"]]
     st.dataframe(show, hide_index=True, width="stretch")
     chart = occ.dropna(subset=["employment_change_pct"]).nlargest(15, "employment_change_pct").copy()
-    chart["label"] = chart["PROV"] + " | NOC " + chart["NOC3DIG"].astype(str)
+    chart["label"] = (chart["PROV"] + " | " + chart["noc_title"].fillna("NOC " + chart["NOC3DIG"].astype(str)
+    )
+)
     if not chart.empty:
         st.bar_chart(chart.set_index("label")[["employment_change_pct"]])
 
 with supply_tab:
     supply_view = results["occupation"][[
-        "PROV", "NOC3DIG", "new_jobs", "employed", "unemployed", "unemprate", "earn_mean", "highageshare",
+        "PROV", "NOC3DIG", "title", "new_jobs", "employed", "unemployed", "unemprate", "earn_mean", "highageshare",
         "supply_employment_change_pct"
     ]].copy()
     st.dataframe(
