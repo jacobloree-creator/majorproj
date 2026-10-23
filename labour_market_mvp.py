@@ -7,7 +7,7 @@ import streamlit as st
 import altair as alt
 
 st.set_page_config(
-    page_title="Major Projects Labour-Market Requirements",
+    page_title="LAMP: Labour Analysis of Major Projects",
     page_icon="🧰",
     layout="wide",
 )
@@ -457,7 +457,7 @@ if "results" not in st.session_state:
     st.session_state["results"] = None
 
 # ---------- Header ----------
-st.title("Major Projects Labour-Market Requirements")
+st.title("LAMP: Labour Analysis of Major Projects")
 st.caption("Translate provincial industry investment shocks into employment, direct occupational requirements, and labour-market context.")
 
 with st.expander("Method and interpretation"):
