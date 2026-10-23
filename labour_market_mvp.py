@@ -519,7 +519,7 @@ with occupation_tab:
     chart = occ.dropna(subset=["employment_change_pct"]).nlargest(15, "employment_change_pct").copy()
     chart["label"] = (
         chart["PROV"]
-        + " | " chart["NOC3DIG"].astype(str) + "|" +
+        + " | " + chart["NOC3DIG"].astype(str) + " | "
         + chart["title"].fillna(
             "NOC " + chart["NOC3DIG"].astype(str)
         )
