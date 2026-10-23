@@ -32,7 +32,7 @@ REQUIRED_LABOUR_COLS = ["PROV", "NOC3DIG", "employed", "unemployed", "unemprate"
 REQUIRED_DEMOGRAPHICS_COLS = ["PROV", "NOC3DIG", "highageshare"]
 REQUIRED_WAGE_COLS = ["PROV", "NOC3DIG", "earn_mean",]
 REQUIRED_NOC_TITLE_COLS = ["NOC3DIG", "title"]
-REQUIRED_VACANCY_COLS = ["PROV", "NOC3DIG", "vacancies", "vacancy_rate"]
+REQUIRED_VACANCY_COLS = ["PROV", "NOC3DIG", "vacancies", "vacancy rate"]
 
 NUMERIC_DEMAND_COLS = [c for c in REQUIRED_DEMAND_COLS if c not in {"IOIC", "PROV", "NOC3DIG"}]
 MULTIPLIER_COLS = [
@@ -169,9 +169,9 @@ def prepare_supply(
         errors="coerce"
     )
 
-    vacancies[["vacancies", "vacancy_rate"]] = (
+    vacancies[["vacancies", "vacancy rate"]] = (
         vacancies[
-            ["vacancies", "vacancy_rate"]
+            ["vacancies", "vacancy rate"]
         ].apply(
             pd.to_numeric,
             errors="coerce"
@@ -185,7 +185,7 @@ def prepare_supply(
 
     vacancies.loc[
         vacancies["vacancy_suppressed"],
-        ["vacancies", "vacancy_rate"]
+        ["vacancies", "vacancy rate"]
     ] = np.nan
     
     # Convert proportions to percentages
@@ -617,7 +617,7 @@ with occupation_tab:
 
 with supply_tab:
     supply_view = results["occupation"][[
-        "PROV", "NOC3DIG", "title", "new_jobs", "employed", "unemployed", "unemprate", "vacancies", "vacancy_rate", "earn_mean", "highageshare",
+        "PROV", "NOC3DIG", "title", "new_jobs", "employed", "unemployed", "unemprate", "vacancies", "vacancy rate", "earn_mean", "highageshare",
         "supply_employment_change_pct"
     ]].copy()
     st.dataframe(
@@ -630,7 +630,7 @@ with supply_tab:
             "unemployed": st.column_config.NumberColumn("Unemployed", format="%.0f"),
             "unemprate": st.column_config.NumberColumn("Unemployment rate (%)", format="%.2f"),
             "vacancies": st.column_config.NumberColumn("Vacancies", format="%.0f"),
-            "vacancy_rate": st.column_config.NumberColumn("Vacancy rate (%)", format="%.2f"),
+            "vacancy rate": st.column_config.NumberColumn("Vacancy rate (%)", format="%.2f"),
             "earn_mean": st.column_config.NumberColumn("Average hourly wage", format="$%.2"),
             "highageshare": st.column_config.NumberColumn("High-age share (%)", format="%.2f"),
             "supply_employment_change_pct": st.column_config.NumberColumn("Demand / employed (%)", format="%.2f"),
