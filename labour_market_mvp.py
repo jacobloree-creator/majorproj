@@ -129,24 +129,6 @@ def prepare_supply(
     demographics = clean_keys(demographics)
     wages = clean_keys(wages)
 
-    require_columns(
-    noc_title,
-    REQUIRED_NOC_TITLE_COLS,
-    NOC_TITLES_FILE.name
-)
-
-noc_titles["NOC3DIG"] = (
-    noc_titles["NOC3DIG"]
-    .astype("string")
-    .str.strip()
-)
-
-noc_titles["noc_title"] = (
-    noc_titles["noc_title"]
-    .astype("string")
-    .str.strip()
-)
-
     # Convert variables to numeric
     labour[
         [
@@ -243,6 +225,47 @@ noc_titles["noc_title"] = (
 
     return supply
 
+def prepare_noc_titles(noc_titles):
+
+    require_columns(
+        noc_titles,
+        REQUIRED_NOC_TITLE_COLS,
+        NOC_TITLES_FILE.name
+    )
+
+    noc_titles = noc_titles.copy()
+
+    noc_titles["NOC3DIG"] = (
+        noc_titles["NOC3DIG"]
+        .astype("string")
+        .str.strip()
+    )
+
+    noc_titles["title"] = (
+        noc_titles["title"]
+        .astype("string")
+        .str.strip()
+    )
+
+    # Each NOC code should have exactly one title
+    if noc_titles["NOC3DIG"].duplicated().any():
+
+        duplicates = noc_titles.loc[
+            noc_titles["NOC3DIG"].duplicated(
+                keep=False
+            ),
+            [
+                "NOC3DIG",
+                "title"
+            ]
+        ]
+
+        raise ValueError(
+            "Duplicate NOC3DIG codes in noc_titles.xlsx:\n"
+            + duplicates.to_string(index=False)
+        )
+
+    return noc_titles
 
 def run_scenario(scenario, industry_data, occ_data, supply_data, noc_titles, geography="within"):
     scenario = scenario.copy()
@@ -383,6 +406,9 @@ try:
         demographics,
         wages
     )
+    noc_titles = prepare_noc_titles(
+        noc_titles
+    )
 except Exception as exc:
     st.error(f"Could not prepare the data: {exc}")
     st.stop()
@@ -490,7 +516,7 @@ with occupation_tab:
     show = occ[["PROV", "NOC3DIG", "title", "new_jobs", "totalemp_occ", "employment_change_pct", "pressure_rank"]]
     st.dataframe(show, hide_index=True, width="stretch")
     chart = occ.dropna(subset=["employment_change_pct"]).nlargest(15, "employment_change_pct").copy()
-    chart["label"] = (chart["PROV"] + " | " + chart["noc_title"].fillna("NOC " + chart["NOC3DIG"].astype(str)
+    chart["label"] = (chart["PROV"] + " | " + chart["title"].fillna("NOC " + chart["NOC3DIG"].astype(str)
     )
 )
     if not chart.empty:
@@ -509,9 +535,9 @@ with supply_tab:
             "new_jobs": st.column_config.NumberColumn("New direct jobs", format="%.1f"),
             "employed": st.column_config.NumberColumn("Employed", format="%.0f"),
             "unemployed": st.column_config.NumberColumn("Unemployed", format="%.0f"),
-            "unemprate": st.column_config.NumberColumn("Unemployment rate", format="%.2f"),
-            "earn_mean": st.column_config.NumberColumn("Average hourly wage", format="%.2"),
-            "highageshare": st.column_config.NumberColumn("High-age share", format="%.2f"),
+            "unemprate": st.column_config.NumberColumn("Unemployment rate (%)", format="%.2f"),
+            "earn_mean": st.column_config.NumberColumn("Average hourly wage", format="$%.2"),
+            "highageshare": st.column_config.NumberColumn("High-age share (%)", format="%.2f"),
             "supply_employment_change_pct": st.column_config.NumberColumn("Demand / employed (%)", format="%.2f"),
         },
     )
