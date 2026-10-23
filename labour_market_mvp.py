@@ -466,7 +466,7 @@ with st.expander("Method and interpretation"):
 - Industry results include direct, indirect, and induced jobs and labour income.
 - Occupational requirements allocate **direct jobs only** using province-industry occupational shares.
 - Supply-side indicators are merged at the **province × NOC3DIG** level.
-- `employment_change_pct` uses employment from the occupation-industry coefficient data; `supply_employment_change_pct` uses the independent supply-side `employed` measure.
+- `Employment change` uses employment from the occupation-industry coefficient data; `Supply employment change` uses the independent supply-side `employed` measure.
 - Employment pressure is a demand exposure measure, not a shortage estimate.
 """)
 
