@@ -551,8 +551,42 @@ with industry_tab:
 
 with occupation_tab:
     occ = results["occupation"].copy()
-    show = occ[["PROV", "NOC3DIG", "title", "new_jobs", "totalemp_occ", "employment_change_pct", "pressure_rank"]]
-    st.dataframe(show, hide_index=True, width="stretch")
+    show = occ[["PROV", "NOC3DIG", "title", "new_jobs", "totalemp_occ", "employment_change_pct", "pressure_rank"]].copy()
+    st.dataframe(show, hide_index=True, width="stretch", column_config={ 
+        "PROV": st.column_config.TextColumn(
+            "Province"
+        ),
+
+        "NOC3DIG": st.column_config.TextColumn(
+            "NOC"
+        ),
+
+        "title": st.column_config.TextColumn(
+            "Occupation"
+        ),
+
+        "new_jobs": st.column_config.NumberColumn(
+            "New direct jobs",
+            format="%.0f"
+        ),
+
+        "totalemp_occ": st.column_config.NumberColumn(
+            "Existing employment",
+            format="%.0f"
+        ),
+
+        "employment_change_pct": st.column_config.NumberColumn(
+            "Employment demand increase (%)",
+            format="%.2f"
+        ),
+
+        "pressure_rank": st.column_config.NumberColumn(
+            "Pressure rank",
+            format="%.0f"
+        ),
+    }
+)
+
     chart = occ.dropna(subset=["employment_change_pct"]).nlargest(15, "employment_change_pct").copy()
     chart["label"] = (
         chart["PROV"]
