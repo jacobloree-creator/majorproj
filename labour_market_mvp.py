@@ -18,6 +18,7 @@ LABOUR_FILE = APP_DIR / "unemployment.xlsx"
 DEMOGRAPHICS_FILE = APP_DIR / "demographics.xlsx"
 WAGES_FILE = APP_DIR / "wages.xlsx"
 NOC_TITLES_FILE = APP_DIR / "noc_titles.xlsx"
+VACANCIES_FILE = APP_DIR / "vacancies.xlsx"
 
 REQUIRED_DEMAND_COLS = [
     "IOIC", "PROV", "NOC3DIG", "emp", "totalemp_ind", "occshare",
@@ -31,6 +32,8 @@ REQUIRED_LABOUR_COLS = ["PROV", "NOC3DIG", "employed", "unemployed", "unemprate"
 REQUIRED_DEMOGRAPHICS_COLS = ["PROV", "NOC3DIG", "highageshare"]
 REQUIRED_WAGE_COLS = ["PROV", "NOC3DIG", "earn_mean",]
 REQUIRED_NOC_TITLE_COLS = ["NOC3DIG", "title"]
+REQUIRED_VACANCY_COLS = ["PROV", "NOC3DIG", "vacancies", "vacancy_rate"]
+
 NUMERIC_DEMAND_COLS = [c for c in REQUIRED_DEMAND_COLS if c not in {"IOIC", "PROV", "NOC3DIG"}]
 MULTIPLIER_COLS = [
     "direct_all_wage", "indirect_all_wage", "induced_all_wage",
@@ -54,6 +57,7 @@ def load_data():
     demographics = pd.read_excel(DEMOGRAPHICS_FILE, engine="openpyxl")
     wages = pd.read_excel(WAGES_FILE, engine="openpyxl")
     noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
+    vacancies = pd.read_excel(VACANCIES_FILE, engine="openpyxl")
     return demand, labour, demographics, wages, noc_titles
 
 
@@ -129,7 +133,7 @@ def prepare_supply(
     labour = clean_keys(labour)
     demographics = clean_keys(demographics)
     wages = clean_keys(wages)
-
+    vacancies = clean_keys(vacancies)
     # Convert variables to numeric
     labour[
         [
@@ -158,6 +162,25 @@ def prepare_supply(
         errors="coerce"
     )
 
+    vacancies[["vacancies", "vacancy_rate"]] = (
+        vacancies[
+            ["vacancies", "vacancy_rate"]
+        ].apply(
+            pd.to_numeric,
+            errors="coerce"
+        )
+    )
+
+# Flag suppressed / unreliable observations
+    vacancies["vacancy_suppressed"] = (
+        vacancies["vacancies"] == 0
+    )
+
+    vacancies.loc[
+        vacancies["vacancy_suppressed"],
+        ["vacancies", "vacancy_rate"]
+    ] = np.nan
+    
     # Convert proportions to percentages
     labour["unemprate"] = (
         labour["unemprate"] * 100
@@ -224,6 +247,12 @@ def prepare_supply(
         validate="one_to_one"
     )
 
+    supply = supply.merge(
+        vacancies,
+        on=["PROV", "NOC3DIG"],
+        how="outer",
+        validate="one_to_one"
+    )
     return supply
 
 def prepare_noc_titles(noc_titles):
