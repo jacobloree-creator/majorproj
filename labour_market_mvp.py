@@ -974,22 +974,22 @@ if scenario_mode == "Static scenario":
                         "PROV": "Province",
                         "IOIC": "Industry",
                         "investment_millions": st.column_config.NumberColumn(
-                            "Investment ($M)", format="%.1f"
+                            "Investment ($M)", format="%,.1f"
                         ),
                         "direct_jobs": st.column_config.NumberColumn(
-                            "Direct jobs", format="%.0f"
+                            "Direct jobs", format="%,.0f"
                         ),
                         "indirect_jobs": st.column_config.NumberColumn(
-                            "Indirect jobs", format="%.0f"
+                            "Indirect jobs", format="%,.0f"
                         ),
                         "induced_jobs": st.column_config.NumberColumn(
-                            "Induced jobs", format="%.0f"
+                            "Induced jobs", format="%,.0f"
                         ),
                         "total_jobs": st.column_config.NumberColumn(
-                            "Total jobs", format="%.0f"
+                            "Total jobs", format="%,.0f"
                         ),
                         "total_labour_income": st.column_config.NumberColumn(
-                            "Total labour income", format="$%.0f"
+                            "Total labour income", format="$%,.0f"
                         ),
                     },
                 )
@@ -1017,10 +1017,10 @@ if scenario_mode == "Static scenario":
                         "NOC3DIG": "NOC",
                         "title": "Occupation",
                         "new_jobs": st.column_config.NumberColumn(
-                            "New direct jobs", format="%.0f"
+                            "New direct jobs", format="%,.0f"
                         ),
                         "totalemp_occ": st.column_config.NumberColumn(
-                            "Existing employment", format="%.0f"
+                            "Existing employment", format="%,.0f"
                         ),
                         "employment_change_pct": st.column_config.NumberColumn(
                             "Employment demand increase (%)", format="%.2f"
@@ -1106,25 +1106,25 @@ if scenario_mode == "Static scenario":
                         "NOC3DIG": "NOC",
                         "title": "Occupation",
                         "new_jobs": st.column_config.NumberColumn(
-                            "New direct jobs", format="%.0f"
+                            "New direct jobs", format="%,.0f"
                         ),
                         "employed": st.column_config.NumberColumn(
-                            "Employed", format="%.0f"
+                            "Employed", format="%,.0f"
                         ),
                         "unemployed": st.column_config.NumberColumn(
-                            "Unemployed", format="%.0f"
+                            "Unemployed", format="%,.0f"
                         ),
                         "unemprate": st.column_config.NumberColumn(
                             "Unemployment rate (%)", format="%.2f"
                         ),
                         "vacancies": st.column_config.NumberColumn(
-                            "Vacancies", format="%.0f"
+                            "Vacancies", format="%,.0f"
                         ),
                         "vacancy rate": st.column_config.NumberColumn(
                             "Vacancy rate (%)", format="%.2f"
                         ),
                         "earn_mean": st.column_config.NumberColumn(
-                            "Average hourly wage", format="$%.2f"
+                            "Average hourly wage", format="$%,.0f"
                         ),
                         "highageshare": st.column_config.NumberColumn(
                             "High-age share (%)", format="%.2f"
