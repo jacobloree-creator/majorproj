@@ -1163,8 +1163,91 @@ if scenario_mode == "Static scenario":
 # ============================================================
 
 if scenario_mode == "Project timeline":
-    st.sidebar.header("Project timeline")
+    st.sidebar.subheader("Saved plans")
 
+# Save the current plan
+    if not st.session_state["timeline_rows"].empty:
+        plan_buffer = io.BytesIO()
+
+        with pd.ExcelWriter(plan_buffer, engine="openpyxl") as writer:
+            st.session_state["timeline_rows"].to_excel(
+                writer,
+                sheet_name="Project plan",
+                index=False,
+            )
+
+        st.sidebar.download_button(
+            "Save current plan",
+            data=plan_buffer.getvalue(),
+            file_name="lamp_project_plan.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            width="stretch",
+        )
+
+# Load an existing plan
+    uploaded_plan = st.sidebar.file_uploader(
+        "Load saved plan",
+        type=["xlsx"],
+        key="timeline_plan_upload",
+    )
+
+    if uploaded_plan is not None:
+    try:
+        loaded_plan = pd.read_excel(
+            uploaded_plan,
+            sheet_name="Project plan",
+            engine="openpyxl",
+        )
+
+        required_plan_cols = [
+            "project_name",
+            "PROV",
+            "fiscal_year",
+            "IOIC",
+            "investment_millions",
+        ]
+
+        missing_cols = [
+            col for col in required_plan_cols
+            if col not in loaded_plan.columns
+        ]
+
+        if missing_cols:
+            st.sidebar.error(
+                f"Saved plan is missing columns: {missing_cols}"
+            )
+        else:
+            loaded_plan = loaded_plan[required_plan_cols].copy()
+
+            for col in [
+                "project_name",
+                "PROV",
+                "fiscal_year",
+                "IOIC",
+            ]:
+                loaded_plan[col] = (
+                    loaded_plan[col]
+                    .astype("string")
+                    .str.strip()
+                )
+
+            loaded_plan["investment_millions"] = pd.to_numeric(
+                loaded_plan["investment_millions"],
+                errors="coerce",
+            )
+
+            if st.sidebar.button(
+                "Import plan",
+                type="primary",
+                width="stretch",
+            ):
+                st.session_state["timeline_rows"] = loaded_plan
+                st.session_state["timeline_results"] = None
+                st.rerun()
+
+    except Exception as exc:
+        st.sidebar.error(f"Could not load plan: {exc}")
+        
     project_name = st.sidebar.text_input(
         "Project name",
         value="Project 1",
