@@ -1492,24 +1492,6 @@ if scenario_mode == "Project timeline":
             )
 
     st.sidebar.divider()
-# Save the current plan
-    if not st.session_state["timeline_rows"].empty:
-        plan_buffer = io.BytesIO()
-
-        with pd.ExcelWriter(plan_buffer, engine="openpyxl") as writer:
-            st.session_state["timeline_rows"].to_excel(
-                writer,
-                sheet_name="Project plan",
-                index=False,
-            )
-
-        st.sidebar.download_button(
-            "Save current plan",
-            data=plan_buffer.getvalue(),
-            file_name="lamp_project_plan.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width="stretch",
-        )
 
     if uploaded_plan is not None:
         try:
