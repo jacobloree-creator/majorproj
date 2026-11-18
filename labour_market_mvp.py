@@ -1511,13 +1511,6 @@ if scenario_mode == "Project timeline":
             width="stretch",
         )
 
-# Load an existing plan
-    uploaded_plan = st.sidebar.file_uploader(
-        "Load saved plan",
-        type=["xlsx"],
-        key="timeline_plan_upload",
-    )
-
     if uploaded_plan is not None:
         try:
             loaded_plan = pd.read_excel(
