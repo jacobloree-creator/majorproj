@@ -696,7 +696,246 @@ def to_excel_bytes(sheets):
             frame.to_excel(writer, sheet_name=name[:31], index=False)
     return buffer.getvalue()
 
+# ============================================================
+# PROJECT PLAN SAVE / LOAD HELPERS
+# ============================================================
 
+PLAN_COLUMNS = [
+    "project_name",
+    "PROV",
+    "fiscal_year",
+    "IOIC",
+    "investment_millions",
+]
+
+
+def make_plan_template(industry_data):
+    """
+    Create a blank Excel template with a second sheet containing
+    all valid province x IOIC combinations.
+    """
+    blank_plan = pd.DataFrame(columns=PLAN_COLUMNS)
+
+    valid_industries = (
+        industry_data[["PROV", "IOIC"]]
+        .dropna()
+        .drop_duplicates()
+        .sort_values(["PROV", "IOIC"])
+        .reset_index(drop=True)
+    )
+
+    return to_excel_bytes(
+        {
+            "Project plan": blank_plan,
+            "Valid industries": valid_industries,
+        }
+    )
+
+
+def make_saved_plan(plan, industry_data):
+    """
+    Save the current plan along with the valid IOIC reference sheet.
+    """
+    valid_industries = (
+        industry_data[["PROV", "IOIC"]]
+        .dropna()
+        .drop_duplicates()
+        .sort_values(["PROV", "IOIC"])
+        .reset_index(drop=True)
+    )
+
+    return to_excel_bytes(
+        {
+            "Project plan": plan[PLAN_COLUMNS],
+            "Valid industries": valid_industries,
+        }
+    )
+
+
+def validate_uploaded_plan(plan, industry_data):
+    """
+    Validate an uploaded LAMP project plan.
+
+    Returns:
+        cleaned_plan
+        errors
+    """
+    errors = []
+
+    # --------------------------------------------------------
+    # 1. Required columns
+    # --------------------------------------------------------
+
+    missing = [c for c in PLAN_COLUMNS if c not in plan.columns]
+
+    if missing:
+        errors.append(
+            "Missing required columns: "
+            + ", ".join(missing)
+        )
+        return plan, errors
+
+    plan = plan[PLAN_COLUMNS].copy()
+
+    # --------------------------------------------------------
+    # 2. Clean text fields
+    # --------------------------------------------------------
+
+    for col in [
+        "project_name",
+        "PROV",
+        "fiscal_year",
+        "IOIC",
+    ]:
+        plan[col] = (
+            plan[col]
+            .astype("string")
+            .str.strip()
+        )
+
+    # Remove completely blank rows
+    plan = plan.dropna(how="all").copy()
+
+    # --------------------------------------------------------
+    # 3. Investment
+    # --------------------------------------------------------
+
+    plan["investment_millions"] = pd.to_numeric(
+        plan["investment_millions"],
+        errors="coerce",
+    )
+
+    bad_investment = plan[
+        plan["investment_millions"].isna()
+        | plan["investment_millions"].lt(0)
+    ]
+
+    if not bad_investment.empty:
+        rows = (bad_investment.index + 2).tolist()
+
+        errors.append(
+            "Investment must be numeric and non-negative. "
+            f"Check Excel row(s): {rows}"
+        )
+
+    # --------------------------------------------------------
+    # 4. Project names
+    # --------------------------------------------------------
+
+    bad_project = plan[
+        plan["project_name"].isna()
+        | plan["project_name"].eq("")
+    ]
+
+    if not bad_project.empty:
+        rows = (bad_project.index + 2).tolist()
+
+        errors.append(
+            "Project name cannot be blank. "
+            f"Check Excel row(s): {rows}"
+        )
+
+    # --------------------------------------------------------
+    # 5. Provinces
+    # --------------------------------------------------------
+
+    valid_provinces = set(
+        industry_data["PROV"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+    )
+
+    bad_province = plan[
+        ~plan["PROV"].isin(valid_provinces)
+    ]
+
+    if not bad_province.empty:
+        invalid = (
+            bad_province["PROV"]
+            .dropna()
+            .unique()
+            .tolist()
+        )
+
+        errors.append(
+            "Invalid province code(s): "
+            + ", ".join(map(str, invalid))
+        )
+
+    # --------------------------------------------------------
+    # 6. Fiscal years
+    # --------------------------------------------------------
+
+    bad_year = plan[
+        ~plan["fiscal_year"].isin(FISCAL_YEARS)
+    ]
+
+    if not bad_year.empty:
+        invalid = (
+            bad_year["fiscal_year"]
+            .dropna()
+            .unique()
+            .tolist()
+        )
+
+        errors.append(
+            "Invalid fiscal year(s): "
+            + ", ".join(map(str, invalid))
+        )
+
+    # --------------------------------------------------------
+    # 7. Province x IOIC combinations
+    # --------------------------------------------------------
+
+    valid_combinations = (
+        industry_data[["PROV", "IOIC"]]
+        .dropna()
+        .drop_duplicates()
+        .copy()
+    )
+
+    valid_combinations["PROV"] = (
+        valid_combinations["PROV"]
+        .astype("string")
+        .str.strip()
+    )
+
+    valid_combinations["IOIC"] = (
+        valid_combinations["IOIC"]
+        .astype("string")
+        .str.strip()
+    )
+
+    combination_check = plan.merge(
+        valid_combinations.assign(valid_combination=True),
+        on=["PROV", "IOIC"],
+        how="left",
+    )
+
+    bad_ioic = combination_check[
+        combination_check["valid_combination"].isna()
+    ]
+
+    if not bad_ioic.empty:
+        invalid = (
+            bad_ioic[["PROV", "IOIC"]]
+            .drop_duplicates()
+        )
+
+        invalid_text = "; ".join(
+            f"{row.PROV} × {row.IOIC}"
+            for row in invalid.itertuples()
+        )
+
+        errors.append(
+            "Invalid province × industry combination(s): "
+            + invalid_text
+            + ". Use the 'Valid industries' sheet in the template."
+        )
+
+    return plan, errors
+    
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -1165,6 +1404,94 @@ if scenario_mode == "Static scenario":
 if scenario_mode == "Project timeline":
     st.sidebar.subheader("Saved plans")
 
+    st.sidebar.subheader("Project plans")
+
+    # Blank template
+    blank_template = make_plan_template(industry_data)
+
+    st.sidebar.download_button(
+        "Download blank plan template",
+        data=blank_template,
+        file_name="lamp_project_plan_template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch",
+    )
+
+    # Save current plan
+    if not st.session_state["timeline_rows"].empty:
+        saved_plan = make_saved_plan(
+            st.session_state["timeline_rows"],
+            industry_data,
+        )
+
+        st.sidebar.download_button(
+            "Save current plan",
+            data=saved_plan,
+            file_name="lamp_saved_project_plan.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            width="stretch",
+        )
+
+    # Upload a saved plan
+    uploaded_plan = st.sidebar.file_uploader(
+        "Load project plan",
+        type=["xlsx"],
+        key="timeline_plan_upload",
+    )
+
+    if uploaded_plan is not None:
+        try:
+            uploaded_df = pd.read_excel(
+                uploaded_plan,
+                sheet_name="Project plan",
+                engine="openpyxl",
+            )
+
+            cleaned_plan, plan_errors = validate_uploaded_plan(
+                uploaded_df,
+                industry_data,
+            )
+
+            if plan_errors:
+                st.sidebar.error(
+                    "The uploaded plan has validation errors."
+                )
+
+                for error in plan_errors:
+                    st.sidebar.warning(error)
+
+            else:
+                st.sidebar.success(
+                    f"Plan validated: "
+                    f"{len(cleaned_plan):,} expenditure rows, "
+                    f"{cleaned_plan['project_name'].nunique():,} projects."
+                )
+
+                if st.sidebar.button(
+                    "Import plan",
+                    type="primary",
+                    width="stretch",
+                ):
+                    st.session_state["timeline_rows"] = (
+                        cleaned_plan.copy()
+                    )
+
+                    st.session_state["timeline_results"] = None
+
+                    st.rerun()
+
+        except ValueError as exc:
+            st.sidebar.error(
+                "Could not find the 'Project plan' sheet "
+                f"in the uploaded workbook: {exc}"
+            )
+
+        except Exception as exc:
+            st.sidebar.error(
+                f"Could not read the uploaded plan: {exc}"
+            )
+
+    st.sidebar.divider()
 # Save the current plan
     if not st.session_state["timeline_rows"].empty:
         plan_buffer = io.BytesIO()
