@@ -1538,11 +1538,6 @@ if scenario_mode == "Project timeline":
                     errors="coerce",
                 )
 
-                if st.sidebar.button(
-                    "Import plan",
-                    type="primary",
-                    width="stretch",
-                ):
                     st.session_state["timeline_rows"] = loaded_plan
                     st.session_state["timeline_results"] = None
                     st.rerun()
