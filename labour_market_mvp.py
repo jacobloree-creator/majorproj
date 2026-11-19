@@ -1577,7 +1577,7 @@ if scenario_mode == "Project timeline":
                 "investment_millions": st.column_config.NumberColumn(
                     "Investment ($M)",
                     min_value=0.0,
-                    format="%.1f",
+                    format="%,.1f",
                 ),
             },
             key="timeline_editor",
@@ -1715,25 +1715,25 @@ if scenario_mode == "Project timeline":
                     column_config={
                         "fiscal_year": "Fiscal year",
                         "investment_millions": st.column_config.NumberColumn(
-                            "Investment ($M)", format="%.1f"
+                            "Investment ($M)", format="%,.1f"
                         ),
                         "direct_jobs": st.column_config.NumberColumn(
-                            "Direct jobs", format="%.0f"
+                            "Direct jobs", format="%,.0f"
                         ),
                         "indirect_jobs": st.column_config.NumberColumn(
-                            "Indirect jobs", format="%.0f"
+                            "Indirect jobs", format="%,.0f"
                         ),
                         "induced_jobs": st.column_config.NumberColumn(
-                            "Induced jobs", format="%.0f"
+                            "Induced jobs", format="%,.0f"
                         ),
                         "total_jobs": st.column_config.NumberColumn(
-                            "Total jobs", format="%.0f"
+                            "Total jobs", format="%,.0f"
                         ),
                         "direct_labour_income": st.column_config.NumberColumn(
-                            "Direct labour income", format="$%.0f"
+                            "Direct labour income", format="$%,.0f"
                         ),
                         "total_labour_income": st.column_config.NumberColumn(
-                            "Total labour income", format="$%.0f"
+                            "Total labour income", format="$%,.0f"
                         ),
                     },
                 )
@@ -1776,7 +1776,7 @@ if scenario_mode == "Project timeline":
                             "title": "Occupation",
                             "peak_fiscal_year": "Peak fiscal year",
                             "peak_new_jobs": st.column_config.NumberColumn(
-                                "Peak direct jobs", format="%.0f"
+                                "Peak direct jobs", format="%,.0f"
                             ),
                             "peak_pressure_pct": st.column_config.NumberColumn(
                                 "Peak demand / workforce (%)", format="%.2f"
@@ -1785,7 +1785,7 @@ if scenario_mode == "Project timeline":
                                 "Unemployment rate (%)", format="%.2f"
                             ),
                             "vacancies": st.column_config.NumberColumn(
-                                "Vacancies", format="%.0f"
+                                "Vacancies", format="%,.0f"
                             ),
                             "vacancy_rate": st.column_config.NumberColumn(
                                 "Vacancy rate (%)", format="%.2f"
@@ -1925,7 +1925,7 @@ if scenario_mode == "Project timeline":
                         "NOC3DIG": "NOC",
                         "title": "Occupation",
                         "new_jobs": st.column_config.NumberColumn(
-                            "New direct jobs", format="%.0f"
+                            "New direct jobs", format="%,.0f"
                         ),
                         "employment_change_pct": st.column_config.NumberColumn(
                             "Demand / workforce (%)", format="%.2f"
@@ -1934,7 +1934,7 @@ if scenario_mode == "Project timeline":
                             "Unemployment rate (%)", format="%.2f"
                         ),
                         "vacancies": st.column_config.NumberColumn(
-                            "Vacancies", format="%.0f"
+                            "Vacancies", format="%,.0f"
                         ),
                         "vacancy_rate": st.column_config.NumberColumn(
                             "Vacancy rate (%)", format="%.2f"
