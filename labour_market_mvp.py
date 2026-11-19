@@ -1488,7 +1488,7 @@ if scenario_mode == "Project timeline":
                 f"Could not read the uploaded plan: {exc}"
             )
 
-st.sidebar.divider()   
+    st.sidebar.divider()   
     project_name = st.sidebar.text_input(
         "Project name",
         value="Project 1",
