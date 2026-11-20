@@ -2537,15 +2537,30 @@ if scenario_mode == "Project timeline":
             fiscal_order = timeline_results["fiscal_order"]
             annual_occ = timeline_results["annual_occupation"].copy()
 
+            cops_year_coverage = (
+                annual_occ
+                .groupby("fiscal_year", as_index=False)
+                .agg(
+                    any_cops_available=("cops_available", "any")
+                )
+            )
+
             missing_cops_years = sorted(
-                annual_occ.loc[
-                    ~annual_occ["cops_available"],
+                cops_year_coverage.loc[
+                    ~cops_year_coverage["any_cops_available"],
                     "fiscal_year",
                 ]
                 .dropna()
-                .unique()
                 .tolist()
             )
+
+            if missing_cops_years:
+                st.warning(
+                    "COPS projections are unavailable for: "
+                    + ", ".join(missing_cops_years)
+                    + ". Labour-balance results are shown as missing for "
+                    "those years."
+                )
 
             if missing_cops_years:
                 st.warning(
