@@ -889,6 +889,25 @@ def run_scenario(
 
     detailed["new_jobs"] = detailed["direct_jobs"] * detailed["occshare"]
 
+    if detailed["PROV"].eq("CA").any():
+        st.write(
+            "CA occupation allocation check",
+            detailed.loc[
+                detailed["PROV"].eq("CA"),
+                [
+                    "IOIC",
+                    "NOC3DIG",
+                    "direct_jobs",
+                    "emp",
+                    "occshare",
+                    "new_jobs",
+                    ],
+                ].sort_values(
+                    "new_jobs",
+                    ascending=False,
+                    )
+                    )
+
     occupation = (
         detailed.dropna(subset=["NOC3DIG", "new_jobs"])
         .groupby(["PROV", "NOC3DIG"], as_index=False)
