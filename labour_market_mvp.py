@@ -1418,19 +1418,41 @@ def make_provincial_cops(cops_data, supply_data):
             * provincial_cops["provincial_employment_share"]
         )
 
-    national_employment = (
-        provincial_supply.groupby("NOC3DIG", as_index=False)
-        .agg(national_employment=("employed", "sum"))
+
+    # --------------------------------------------------------
+    # Canada benchmark
+    # --------------------------------------------------------
+    # COPS is already a national projection, so CA should use
+    # the original national flows directly. Do not regionalize.
+    
+    canada_cops = cops_data.copy()
+
+    canada_cops["PROV"] = "CA"
+    canada_cops["provincial_employment_share"] = 1.0
+
+    national_employment_lookup = (
+        provincial_supply
+        .groupby("NOC3DIG", as_index=False)
+        .agg(
+            national_employment=("employed", "sum")
+        )
     )
-    canada_cops = cops_data.merge(
-        national_employment,
+
+    canada_cops = canada_cops.merge(
+        national_employment_lookup,
         on="NOC3DIG",
         how="left",
         validate="many_to_one",
     )
-    canada_cops["PROV"] = "CA"
-    canada_cops["provincial_employment_share"] = 1.0
 
+    return pd.concat(
+        [
+            provincial_cops,
+            canada_cops,
+        ],
+        ignore_index=True,
+        sort=False,
+    )
     return pd.concat(
         [provincial_cops, canada_cops],
         ignore_index=True,
@@ -2901,7 +2923,6 @@ if scenario_mode == "Project timeline":
                             "NOC3DIG",
                             "title",
                             "fiscal_year",
-                            "total_inflows",
                             "total_baseline_openings",
                             "new_jobs",
                             "total_demand_with_lamp",
