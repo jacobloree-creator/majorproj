@@ -2930,9 +2930,7 @@ if scenario_mode == "Project timeline":
                         .encode(
                             x=alt.X(
                                 "workers:Q",
-                                title=(
-                                    "Projected labour-market "
-                                    "balance (workers)",
+                                title="Projected labour-market balance (workers)",
                                     stack=None,
                                 ),
                             ),
