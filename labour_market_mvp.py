@@ -122,7 +122,7 @@ def load_data():
     wages = pd.read_excel(WAGES_FILE, engine="openpyxl")
     noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
     vacancies = pd.read_excel(VACANCIES_FILE, engine="openpyxl")
-    cops = pd.read_excel(COPS_FILE, engine="openpxyl")
+    cops = pd.read_excel(COPS_FILE, engine="openpyxl")
     return demand, labour, demographics, wages, noc_titles, vacancies, cops
 
 
