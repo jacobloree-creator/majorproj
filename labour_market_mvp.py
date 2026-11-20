@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Nov 20 10:07:44 2026
+
+@author: jloree
+"""
+
 import io
 from pathlib import Path
 
@@ -25,6 +32,7 @@ DEMOGRAPHICS_FILE = APP_DIR / "demographics.xlsx"
 WAGES_FILE = APP_DIR / "wages.xlsx"
 NOC_TITLES_FILE = APP_DIR / "noc_titles.xlsx"
 VACANCIES_FILE = APP_DIR / "vacancies.xlsx"
+COPS_FILE = APP_DIR / "cops flows.xlsx"
 
 REQUIRED_DEMAND_COLS = [
     "IOIC", "PROV", "NOC3DIG", "emp", "totalemp_ind", "occshare",
@@ -54,6 +62,20 @@ REQUIRED_NOC_TITLE_COLS = [
 # The source workbook uses a space in "vacancy rate".
 REQUIRED_VACANCY_COLS = [
     "PROV", "NOC3DIG", "vacancies", "vacancy rate"
+]
+
+COPS_FLOW_TYPES = [
+    "expansiondemand",
+    "retirement_outflow",
+    "emigration_outflow",
+    "school_inflow",
+    "immigrant_inflow",
+    "other_inflow",
+]
+
+REQUIRED_COPS_COLS = [
+    "noc3dig",
+    "type",
 ]
 
 NUMERIC_DEMAND_COLS = [
@@ -100,7 +122,8 @@ def load_data():
     wages = pd.read_excel(WAGES_FILE, engine="openpyxl")
     noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
     vacancies = pd.read_excel(VACANCIES_FILE, engine="openpyxl")
-    return demand, labour, demographics, wages, noc_titles, vacancies
+    cops = pd.read_excel(COPS_FILE, engine="openpxyl")
+    return demand, labour, demographics, wages, noc_titles, vacancies, cops
 
 
 def prepare_coefficients(raw):
@@ -151,6 +174,7 @@ def prepare_coefficients(raw):
         ]
     ].copy()
 
+    
     return df, industry_data, occ_data, bad_shares, inconsistent
 
 
@@ -274,7 +298,206 @@ def prepare_noc_titles(noc_titles):
 
     return noc_titles
 
+def prepare_cops(raw_cops):
+    """
+    Convert national COPS flows from wide format:
 
+        noc3dig | type | year2025 | year2026 | ...
+
+    to long format:
+
+        NOC3DIG | calendar_year | fiscal_year | flow variables
+    """
+    cops = raw_cops.copy()
+
+    require_columns(
+        cops,
+        REQUIRED_COPS_COLS,
+        COPS_FILE.name,
+    )
+
+    # --------------------------------------------------------
+    # Clean the NOC field
+    # --------------------------------------------------------
+
+    cops["NOC3DIG"] = (
+        cops["noc3dig"]
+        .astype("string")
+        .str.strip()
+        .str.replace(r"\.0$", "", regex=True)
+        .str.zfill(3)
+    )
+
+    cops["type"] = (
+        cops["type"]
+        .astype("string")
+        .str.strip()
+        .str.lower()
+    )
+
+    # --------------------------------------------------------
+    # Validate flow types
+    # --------------------------------------------------------
+
+    unexpected_types = sorted(
+        set(cops["type"].dropna())
+        - set(COPS_FLOW_TYPES)
+    )
+
+    if unexpected_types:
+        raise ValueError(
+            "Unexpected flow type(s) in "
+            f"{COPS_FILE.name}: {unexpected_types}"
+        )
+
+    missing_types = sorted(
+        set(COPS_FLOW_TYPES)
+        - set(cops["type"].dropna())
+    )
+
+    if missing_types:
+        raise ValueError(
+            "Missing required COPS flow type(s): "
+            f"{missing_types}"
+        )
+
+    # --------------------------------------------------------
+    # Identify year columns
+    # --------------------------------------------------------
+
+    year_cols = [
+        col for col in cops.columns
+        if str(col).lower().startswith("year")
+    ]
+
+    if not year_cols:
+        raise ValueError(
+            f"{COPS_FILE.name} has no columns beginning with 'year'."
+        )
+
+    # --------------------------------------------------------
+    # Convert annual values to numeric
+    # --------------------------------------------------------
+
+    cops[year_cols] = cops[year_cols].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+
+    if cops[year_cols].isna().any().any():
+        bad_rows = cops.loc[
+            cops[year_cols].isna().any(axis=1),
+            ["NOC3DIG", "type"],
+        ]
+
+        raise ValueError(
+            "COPS contains missing or non-numeric annual values:\n"
+            + bad_rows.head(20).to_string(index=False)
+        )
+
+    # --------------------------------------------------------
+    # Confirm one row per NOC x flow type
+    # --------------------------------------------------------
+
+    duplicates = cops.duplicated(
+        ["NOC3DIG", "type"],
+        keep=False,
+    )
+
+    if duplicates.any():
+        duplicate_rows = cops.loc[
+            duplicates,
+            ["NOC3DIG", "type"],
+        ]
+
+        raise ValueError(
+            "Duplicate NOC x flow-type rows in COPS:\n"
+            + duplicate_rows.to_string(index=False)
+        )
+
+    # --------------------------------------------------------
+    # Reshape to long
+    # --------------------------------------------------------
+
+    cops_long = cops.melt(
+        id_vars=["NOC3DIG", "type"],
+        value_vars=year_cols,
+        var_name="year_column",
+        value_name="flow_value",
+    )
+
+    cops_long["calendar_year"] = (
+        cops_long["year_column"]
+        .astype(str)
+        .str.extract(r"(\d{4})", expand=False)
+    )
+
+    cops_long["calendar_year"] = pd.to_numeric(
+        cops_long["calendar_year"],
+        errors="raise",
+    ).astype(int)
+
+    # Map calendar year 2026 to fiscal year 2026-27.
+    cops_long["fiscal_year"] = (
+        cops_long["calendar_year"].astype(str)
+        + "-"
+        + (
+            (cops_long["calendar_year"] + 1) % 100
+        )
+        .astype(str)
+        .str.zfill(2)
+    )
+
+    # --------------------------------------------------------
+    # Put each flow in its own column
+    # --------------------------------------------------------
+
+    cops_prepared = (
+        cops_long
+        .pivot(
+            index=[
+                "NOC3DIG",
+                "calendar_year",
+                "fiscal_year",
+            ],
+            columns="type",
+            values="flow_value",
+        )
+        .reset_index()
+    )
+
+    cops_prepared.columns.name = None
+
+    # --------------------------------------------------------
+    # Derived national measures
+    # --------------------------------------------------------
+
+    cops_prepared["total_inflows"] = cops_prepared[
+        [
+            "school_inflow",
+            "immigrant_inflow",
+            "other_inflow",
+        ]
+    ].sum(axis=1)
+
+    cops_prepared["replacement_demand"] = cops_prepared[
+        [
+            "retirement_outflow",
+            "emigration_outflow",
+        ]
+    ].sum(axis=1)
+
+    cops_prepared["total_baseline_openings"] = (
+        cops_prepared["expansiondemand"]
+        + cops_prepared["replacement_demand"]
+    )
+
+    cops_prepared["baseline_balance"] = (
+        cops_prepared["total_inflows"]
+        - cops_prepared["total_baseline_openings"]
+    )
+
+    return cops_prepared
 # ============================================================
 # CORE STATIC LAMP ENGINE
 # ============================================================
@@ -484,6 +707,7 @@ def run_timeline_scenario(
     occ_data,
     supply_data,
     noc_titles,
+    provincial_cops,
     geography="within",
 ):
     timeline = timeline.copy()
@@ -619,6 +843,96 @@ def run_timeline_scenario(
         np.nan,
     )
 
+        # ========================================================
+    # MERGE COPS BASELINE FLOWS
+    # ========================================================
+
+    cops_merge_cols = [
+        "PROV",
+        "NOC3DIG",
+        "fiscal_year",
+        "provincial_employment_share",
+        "expansiondemand",
+        "retirement_outflow",
+        "emigration_outflow",
+        "school_inflow",
+        "immigrant_inflow",
+        "other_inflow",
+        "total_inflows",
+        "replacement_demand",
+        "total_baseline_openings",
+        "baseline_balance",
+    ]
+
+    annual_occ = annual_occ.merge(
+        provincial_cops[cops_merge_cols],
+        on=["PROV", "NOC3DIG", "fiscal_year"],
+        how="left",
+        validate="many_to_one",
+    )
+
+    # COPS baseline after adding incremental LAMP requirements.
+    annual_occ["post_project_balance"] = (
+        annual_occ["baseline_balance"]
+        - annual_occ["new_jobs"]
+    )
+
+    # Positive values indicate an estimated deficit/pressure.
+    annual_occ["baseline_gap"] = (
+        -annual_occ["baseline_balance"]
+    ).clip(lower=0)
+
+    annual_occ["post_project_gap"] = (
+        -annual_occ["post_project_balance"]
+    ).clip(lower=0)
+
+    # Amount by which LAMP worsens an existing deficit or creates
+    # an entirely new deficit.
+    annual_occ["incremental_gap_due_to_projects"] = (
+        annual_occ["post_project_gap"]
+        - annual_occ["baseline_gap"]
+    ).clip(lower=0)
+
+    annual_occ["post_project_balance_pct"] = np.where(
+        annual_occ["employed"].gt(0),
+        annual_occ["post_project_balance"]
+        / annual_occ["employed"]
+        * 100,
+        np.nan,
+    )
+
+    annual_occ["post_project_gap_pct"] = np.where(
+        annual_occ["employed"].gt(0),
+        annual_occ["post_project_gap"]
+        / annual_occ["employed"]
+        * 100,
+        np.nan,
+    )
+
+    annual_occ["balance_status"] = np.select(
+        [
+            annual_occ["baseline_balance"].ge(0)
+            & annual_occ["post_project_balance"].lt(0),
+
+            annual_occ["baseline_balance"].lt(0)
+            & annual_occ["post_project_balance"].lt(
+                annual_occ["baseline_balance"]
+            ),
+
+            annual_occ["post_project_balance"].ge(0),
+        ],
+        [
+            "Moves into deficit with projects",
+            "Existing deficit worsens",
+            "Projected inflows cover openings",
+        ],
+        default="Missing COPS projection",
+    )
+
+    annual_occ["cops_available"] = (
+        annual_occ["baseline_balance"].notna()
+    )
+
     annual_occ["fiscal_year"] = pd.Categorical(
         annual_occ["fiscal_year"],
         categories=fiscal_order,
@@ -654,6 +968,43 @@ def run_timeline_scenario(
             .reset_index(drop=True)
         )
 
+        # ========================================================
+    # PEAK COPS-ADJUSTED LABOUR PRESSURE
+    # ========================================================
+
+    valid_cops_peak = annual_occ.dropna(
+        subset=["post_project_gap_pct"]
+    ).copy()
+
+    if valid_cops_peak.empty:
+        cops_peak_occ = pd.DataFrame()
+    else:
+        cops_peak_index = (
+            valid_cops_peak
+            .groupby(["PROV", "NOC3DIG"])["post_project_gap_pct"]
+            .idxmax()
+        )
+
+        cops_peak_occ = (
+            valid_cops_peak.loc[cops_peak_index]
+            .copy()
+            .rename(
+                columns={
+                    "fiscal_year": "peak_cops_fiscal_year",
+                    "new_jobs": "peak_lamp_demand",
+                    "baseline_balance": "peak_baseline_balance",
+                    "post_project_balance": "peak_post_project_balance",
+                    "post_project_gap": "peak_post_project_gap",
+                    "post_project_gap_pct": "peak_post_project_gap_pct",
+                }
+            )
+            .sort_values(
+                "peak_post_project_gap_pct",
+                ascending=False,
+            )
+            .reset_index(drop=True)
+        )
+
     # Project-level contribution to each province x occupation x year.
     project_occ = occupation_by_project[
         [
@@ -680,6 +1031,7 @@ def run_timeline_scenario(
         "annual_industry": annual_industry,
         "annual_occupation": annual_occ,
         "peak_occupation": peak_occ,
+        "cops_peak_occupation": cops_peak_occ,
         "project_occupation": project_occ,
         "fiscal_order": fiscal_order,
     }
@@ -751,6 +1103,68 @@ def make_saved_plan(plan, industry_data):
         }
     )
 
+def make_provincial_cops(cops_data, supply_data):
+    """
+    Allocate national COPS occupation flows to provinces using
+    each province's share of current Canadian employment in the
+    corresponding occupation.
+    """
+    employment = supply_data[
+        ["PROV", "NOC3DIG", "employed"]
+    ].copy()
+
+    employment["employed"] = pd.to_numeric(
+        employment["employed"],
+        errors="coerce",
+    )
+
+    employment["national_employment"] = (
+        employment
+        .groupby("NOC3DIG")["employed"]
+        .transform("sum")
+    )
+
+    employment["provincial_employment_share"] = np.where(
+        employment["national_employment"].gt(0),
+        employment["employed"]
+        / employment["national_employment"],
+        np.nan,
+    )
+
+    provincial_cops = employment[
+        [
+            "PROV",
+            "NOC3DIG",
+            "provincial_employment_share",
+            "national_employment",
+        ]
+    ].merge(
+        cops_data,
+        on="NOC3DIG",
+        how="inner",
+        validate="many_to_many",
+    )
+
+    flow_cols = [
+        "expansiondemand",
+        "retirement_outflow",
+        "emigration_outflow",
+        "school_inflow",
+        "immigrant_inflow",
+        "other_inflow",
+        "total_inflows",
+        "replacement_demand",
+        "total_baseline_openings",
+        "baseline_balance",
+    ]
+
+    for col in flow_cols:
+        provincial_cops[col] = (
+            provincial_cops[col]
+            * provincial_cops["provincial_employment_share"]
+        )
+
+    return provincial_cops
 
 def validate_uploaded_plan(plan, industry_data):
     """
@@ -975,7 +1389,7 @@ if "timeline_results" not in st.session_state:
 # ============================================================
 
 try:
-    raw, labour, demographics, wages, noc_titles, vacancies = load_data()
+    raw, labour, demographics, wages, noc_titles, vacancies, raw_cops = load_data()
 
     (
         df,
@@ -993,11 +1407,60 @@ try:
     )
 
     noc_titles = prepare_noc_titles(noc_titles)
-
+    cops_data = prepare_cops(raw_cops)
+    provincial_cops = make_provincial_cops(cops_data, supply_data)
 except Exception as exc:
     st.error(f"Could not prepare the data: {exc}")
     st.stop()
 
+    # ============================================================
+# COPS VALIDATION
+# ============================================================
+
+# ------------------------------------------------------------
+# 1. Check that provincial allocation shares sum to one
+# ------------------------------------------------------------
+
+cops_share_check = (
+    provincial_cops[
+        ["NOC3DIG", "PROV", "provincial_employment_share"]
+    ]
+    .drop_duplicates()
+    .groupby("NOC3DIG", as_index=False)
+    .agg(
+        share_sum=("provincial_employment_share", "sum")
+    )
+)
+
+bad_cops_shares = cops_share_check.loc[
+    ~np.isclose(
+        cops_share_check["share_sum"],
+        1,
+        atol=0.001,
+    )
+]
+
+# ------------------------------------------------------------
+# 2. Check whether any LAMP occupations are missing from COPS
+# ------------------------------------------------------------
+
+lamp_nocs = set(
+    occ_data["NOC3DIG"]
+    .dropna()
+    .astype(str)
+    .str.strip()
+)
+
+cops_nocs = set(
+    cops_data["NOC3DIG"]
+    .dropna()
+    .astype(str)
+    .str.strip()
+)
+
+missing_cops_nocs = sorted(
+    lamp_nocs - cops_nocs
+)
 
 # ============================================================
 # HEADER AND GLOBAL VALIDATION
@@ -1021,6 +1484,12 @@ with st.expander("Method and interpretation"):
 - Project timeline scenarios treat annual funding/expenditure as generating labour requirements in that fiscal year.
 - Timeline pressure measures use the current workforce as a fixed capacity benchmark across fiscal years.
 - Employment pressure is a demand exposure measure, **not a shortage estimate**.
+- COPS provides annual national occupational inflows and baseline labour demand.
+- COPS national flows are allocated to provinces using current provincial employment shares within each occupation.
+- Baseline COPS balance equals projected inflows less expansion demand, retirements, and emigration.
+- The post-project balance subtracts LAMP direct occupational requirements from the baseline COPS balance.
+- COPS "other inflows" include occupational mobility, net re-entry, and other adjustments and are not interpreted as an independently available worker pool.
+- COPS-adjusted balances are accounting pressure indicators, not equilibrium shortage forecasts.
         """
     )
 
@@ -1035,6 +1504,27 @@ if not inconsistent_multipliers.empty:
     st.sidebar.error("Multipliers vary within some province-industry cells.")
     st.dataframe(inconsistent_multipliers, hide_index=True, width="stretch")
     st.stop()
+    
+# COPS provincial allocation validation
+
+if bad_cops_shares.empty:
+    st.sidebar.success("COPS provincial allocation validation passed.")
+else:
+    st.sidebar.warning(
+        f"{len(bad_cops_shares):,} COPS occupation groups "
+        "could not be fully allocated across provinces."
+    )
+
+
+# COPS / LAMP occupation matching validation
+
+if not missing_cops_nocs:
+    st.sidebar.success("LAMP-COPS occupation matching passed.")
+else:
+    st.sidebar.warning(
+        f"{len(missing_cops_nocs):,} LAMP occupation groups "
+        "have no matching COPS flow data."
+    )
 
 provinces = (
     industry_data["PROV"]
@@ -1597,12 +2087,13 @@ if scenario_mode == "Project timeline":
         if st.button("Run project pipeline", type="primary", width="stretch"):
             try:
                 st.session_state["timeline_results"] = run_timeline_scenario(
-                    st.session_state["timeline_rows"],
-                    industry_data,
-                    occ_data,
-                    supply_data,
-                    noc_titles,
-                    timeline_geography,
+                    timeline=st.session_state["timeline_rows"],
+                    industry_data=industry_data,
+                    occ_data=occ_data,
+                    supply_data=supply_data,
+                    noc_titles=noc_titles,
+                    provincial_cops=provincial_cops,
+                    geography=timeline_geography,
                 )
             except Exception as exc:
                 st.error(str(exc))
@@ -1634,11 +2125,31 @@ if scenario_mode == "Project timeline":
 
             annual = timeline_results["annual_industry"].copy()
             fiscal_order = timeline_results["fiscal_order"]
+            annual_occ = timeline_results["annual_occupation"].copy()
 
-            overview_tab, peak_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
+            missing_cops_years = sorted(
+                annual_occ.loc[
+                    ~annual_occ["cops_available"],
+                    "fiscal_year",
+                ]
+                .dropna()
+                .unique()
+                .tolist()
+            )
+
+            if missing_cops_years:
+                st.warning(
+                    "COPS projections are unavailable for: "
+                    + ", ".join(missing_cops_years)
+                    + ". Labour-balance results are shown as missing for "
+                    "those years."
+                )
+
+            overview_tab, peak_tab, cops_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
                 [
                     "Annual overview",
                     "Peak occupational pressures",
+                    "COPS labour balance",
                     "Occupation over time",
                     "Project contributions",
                     "Downloads",
@@ -1840,6 +2351,256 @@ if scenario_mode == "Project timeline":
                     )
                     st.altair_chart(peak_bar, width="stretch")
 
+            with cops_tab:
+                cops_view = timeline_results["annual_occupation"].copy()
+
+                missing_cops_years = sorted(
+                    cops_view.loc[
+                        ~cops_view["cops_available"],
+                        "fiscal_year",
+                        ]
+                    .dropna()
+                    .unique()
+                    .tolist()
+                    )
+
+            if missing_cops_years:
+                st.warning(
+                    "COPS-based balances are unavailable for: "
+                    + ", ".join(missing_cops_years)
+                    + "."
+                    )
+
+            cops_view = cops_view.loc[
+                cops_view["cops_available"]
+            ].copy()
+
+            st.subheader("Labour-market balance with project demand")
+
+            st.caption(
+                "National COPS flows are allocated to provinces based on "
+                "each province's current share of employment in the occupation. "
+                "A negative balance indicates that projected openings and LAMP "
+                "requirements exceed projected inflows. This is an accounting "
+                "pressure indicator, not a behavioural shortage forecast."
+            )
+        
+            status_options = [
+                "All occupations",
+                "Moves into deficit with projects",
+                "Existing deficit worsens",
+                "Projected inflows cover openings",
+            ]
+
+            selected_status = st.selectbox(
+                "Balance status",
+                status_options,
+                key="cops_balance_status",
+            )
+
+            if selected_status != "All occupations":
+                cops_view = cops_view.loc[
+                    cops_view["balance_status"].eq(selected_status)
+                ].copy()
+
+        cops_display = cops_view[
+            [
+                "PROV",
+                "fiscal_year",
+                "NOC3DIG",
+                "title",
+                "school_inflow",
+                "immigrant_inflow",
+                "other_inflow",
+                "total_inflows",
+                "total_baseline_openings",
+                "baseline_balance",
+                "new_jobs",
+                "post_project_balance",
+                "post_project_gap",
+                "post_project_gap_pct",
+                "balance_status",
+            ]
+        ].sort_values(
+            ["post_project_gap", "new_jobs"],
+            ascending=[False, False],
+        )
+
+        st.dataframe(
+            cops_display,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "PROV": "Province",
+                "fiscal_year": "Fiscal year",
+                "NOC3DIG": "NOC",
+                "title": "Occupation",
+                "school_inflow": st.column_config.NumberColumn(
+                    "School inflow",
+                    format="%,.0f",
+                ),
+                "immigrant_inflow": st.column_config.NumberColumn(
+                    "Immigrant inflow",
+                    format="%,.0f",
+                ),
+                "other_inflow": st.column_config.NumberColumn(
+                    "Other inflow",
+                    format="%,.0f",
+                ),
+                "total_inflows": st.column_config.NumberColumn(
+                    "Total projected inflows",
+                    format="%,.0f",
+                ),
+                "total_baseline_openings": st.column_config.NumberColumn(
+                    "Baseline openings",
+                    format="%,.0f",
+                ),
+                "baseline_balance": st.column_config.NumberColumn(
+                    "Baseline balance",
+                    format="%,.0f",
+                ),
+                "new_jobs": st.column_config.NumberColumn(
+                    "LAMP direct demand",
+                    format="%,.0f",
+                ),
+                "post_project_balance": st.column_config.NumberColumn(
+                    "Balance with projects",
+                    format="%,.0f",
+                ),
+                "post_project_gap": st.column_config.NumberColumn(
+                    "Potential gap",
+                    format="%,.0f",
+                ),
+                "post_project_gap_pct": st.column_config.NumberColumn(
+                    "Potential gap / workforce (%)",
+                    format="%.2f",
+                ),
+                "balance_status": "Status",
+            },
+        )
+
+            # ========================================================
+    # COPS BALANCE CHART
+    # ========================================================
+
+    st.subheader("Effect of projects on occupational balance")
+
+    available_cops_years = (
+        cops_view["fiscal_year"]
+        .dropna()
+        .drop_duplicates()
+        .tolist()
+    )
+
+    if available_cops_years:
+
+        selected_cops_year = st.selectbox(
+            "Fiscal year",
+            available_cops_years,
+            key="cops_year_selector",
+        )
+
+        # For the selected year, show occupations with the
+        # weakest post-project labour-market balance.
+        chart_data = (
+            cops_view.loc[
+                cops_view["fiscal_year"].eq(selected_cops_year)
+                & cops_view["post_project_balance"].notna()
+            ]
+            .nsmallest(
+                15,
+                "post_project_balance",
+            )
+            .copy()
+        )
+
+        chart_data["label"] = (
+            chart_data["PROV"]
+            + " | NOC "
+            + chart_data["NOC3DIG"].astype(str)
+            + " | "
+            + chart_data["title"].fillna("Unknown occupation")
+        )
+
+        balance_long = chart_data.melt(
+            id_vars=[
+                "label",
+                "PROV",
+                "NOC3DIG",
+                "title",
+                "fiscal_year",
+            ],
+            value_vars=[
+                "baseline_balance",
+                "post_project_balance",
+            ],
+            var_name="balance_type",
+            value_name="workers",
+        )
+
+        balance_long["balance_type"] = (
+            balance_long["balance_type"].map(
+                {
+                    "baseline_balance": "COPS baseline",
+                    "post_project_balance": "With LAMP projects",
+                }
+            )
+        )
+
+        if not balance_long.empty:
+
+            balance_chart = (
+                alt.Chart(balance_long)
+                .mark_bar()
+                .encode(
+                    x=alt.X(
+                        "workers:Q",
+                        title="Projected labour-market balance (workers)",
+                    ),
+                    y=alt.Y(
+                        "label:N",
+                        sort=alt.SortField(
+                            field="post_project_balance",
+                            order="ascending",
+                        ),
+                        title=None,
+                        axis=alt.Axis(labelLimit=550),
+                    ),
+                    color=alt.Color(
+                        "balance_type:N",
+                        title=None,
+                    ),
+                    tooltip=[
+                        alt.Tooltip(
+                            "PROV:N",
+                            title="Province",
+                        ),
+                        alt.Tooltip(
+                            "NOC3DIG:N",
+                            title="NOC",
+                        ),
+                        alt.Tooltip(
+                            "title:N",
+                            title="Occupation",
+                        ),
+                        alt.Tooltip(
+                            "balance_type:N",
+                            title="Scenario",
+                        ),
+                        alt.Tooltip(
+                            "workers:Q",
+                            title="Balance",
+                            format=",.0f",
+                        ),
+                    ],
+                )
+                .properties(height=500)
+            )
+
+            st.altair_chart(
+                balance_chart,
+                width="stretch",
+            )
             with occupation_time_tab:
                 annual_occ = timeline_results["annual_occupation"].copy()
                 annual_occ["display_name"] = (
@@ -2041,8 +2802,10 @@ if scenario_mode == "Project timeline":
                         "Annual industry": timeline_results["annual_industry"],
                         "Annual occupations": timeline_results["annual_occupation"],
                         "Peak occupations": timeline_results["peak_occupation"],
+                        "COPS balance peaks": timeline_results["cops_peak_occupation"],
                         "Industry by project": timeline_results["industry_by_project"],
                         "Occupation by project": timeline_results["occupation_by_project"],
+                        "Provincial COPS": provincial_cops,
                     }
                 )
 
