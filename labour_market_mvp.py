@@ -1835,7 +1835,7 @@ else:
     )
 
 if missing_canada_multipliers:
-st.sidebar.warning(
+    st.sidebar.warning(
         f"{len(missing_canada_multipliers):,} industries in the provincial "
         "occupational data have no Canada-level multiplier: "
         + "; ".join(missing_canada_multipliers)
