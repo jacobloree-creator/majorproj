@@ -1301,6 +1301,7 @@ def run_timeline_scenario(
         "Total investment ($M)": timeline["investment_millions"].sum(),
         "Number of projects": timeline["project_name"].nunique(),
         "Number of fiscal years": timeline["fiscal_year"].nunique(),
+        "Total direct job-years": annual_industry["direct_jobs"].sum(),
         "Peak direct jobs": annual_industry["direct_jobs"].max(),
         "Peak direct jobs FY": annual_industry.loc[
             annual_industry["direct_jobs"].idxmax(), "fiscal_year"
