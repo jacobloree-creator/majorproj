@@ -2932,7 +2932,8 @@ if scenario_mode == "Project timeline":
                                 "workers:Q",
                                 title=(
                                     "Projected labour-market "
-                                    "balance (workers)"
+                                    "balance (workers)",
+                                    stack=None,
                                 ),
                             ),
 
