@@ -33,6 +33,7 @@ WAGES_FILE = APP_DIR / "wages.xlsx"
 NOC_TITLES_FILE = APP_DIR / "noc_titles.xlsx"
 VACANCIES_FILE = APP_DIR / "vacancies.xlsx"
 COPS_FILE = APP_DIR / "cops flows.xlsx"
+CANADA_MULTIPLIERS_FILE = APP_DIR / "canada_multipliers.xlsx"
 
 REQUIRED_DEMAND_COLS = [
     "IOIC", "PROV", "NOC3DIG", "emp", "totalemp_ind", "occshare",
@@ -76,6 +77,16 @@ COPS_FLOW_TYPES = [
 REQUIRED_COPS_COLS = [
     "noc3dig",
     "type",
+]
+REQUIRED_CANADA_MULTIPLIER_COLS = [
+    "PROV",
+    "IOIC",
+    "direct_all_job",
+    "indirect_all_job",
+    "induced_all_job",
+    "direct_all_wage",
+    "indirect_all_wage",
+    "induced_all_wage",
 ]
 
 NUMERIC_DEMAND_COLS = [
@@ -123,7 +134,20 @@ def load_data():
     noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
     vacancies = pd.read_excel(VACANCIES_FILE, engine="openpyxl")
     cops = pd.read_excel(COPS_FILE, engine="openpyxl")
-    return demand, labour, demographics, wages, noc_titles, vacancies, cops
+    canada_multipliers = pd.read_excel(
+        CANADA_MULTIPLIERS_FILE,
+        engine="openpyxl",
+    )
+    return (
+        demand,
+        labour,
+        demographics,
+        wages,
+        noc_titles,
+        vacancies,
+        cops,
+        canada_multipliers,
+    )
 
 
 def prepare_coefficients(raw):
@@ -498,6 +522,240 @@ def prepare_cops(raw_cops):
     )
 
     return cops_prepared
+
+def weighted_mean(values, weights):
+    """Return a weighted mean using rows where both inputs are available."""
+    valid = values.notna() & weights.notna() & weights.gt(0)
+    if not valid.any():
+        return np.nan
+    return np.average(values.loc[valid], weights=weights.loc[valid])
+
+
+def prepare_canada_multipliers(raw_canada):
+    """Prepare official Canada-level all-provinces multipliers."""
+    canada = raw_canada.copy()
+    require_columns(
+        canada,
+        REQUIRED_CANADA_MULTIPLIER_COLS,
+        CANADA_MULTIPLIERS_FILE.name,
+    )
+
+    canada = canada[REQUIRED_CANADA_MULTIPLIER_COLS].copy()
+    canada["PROV"] = canada["PROV"].astype("string").str.strip().str.upper()
+    canada["IOIC"] = canada["IOIC"].astype("string").str.strip()
+
+    if not canada["PROV"].eq("CA").all():
+        raise ValueError(
+            f"{CANADA_MULTIPLIERS_FILE.name} must use PROV='CA' for every row."
+        )
+
+    numeric_cols = [
+        c for c in REQUIRED_CANADA_MULTIPLIER_COLS
+        if c not in {"PROV", "IOIC"}
+    ]
+    canada[numeric_cols] = canada[numeric_cols].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+
+    if canada[numeric_cols].isna().any().any():
+        bad = canada.loc[
+            canada[numeric_cols].isna().any(axis=1),
+            ["PROV", "IOIC"],
+        ]
+        raise ValueError(
+            "Canada multipliers contain missing or non-numeric values:\n"
+            + bad.to_string(index=False)
+        )
+
+    if canada["IOIC"].duplicated().any():
+        dupes = canada.loc[
+            canada["IOIC"].duplicated(keep=False),
+            ["PROV", "IOIC"],
+        ]
+        raise ValueError(
+            "Duplicate Canada multiplier industries:\n"
+            + dupes.to_string(index=False)
+        )
+
+    # Canada has no separate within-province concept. Mirroring the official
+    # all-provinces fields lets mixed provincial/Canada plans run while the UI
+    # clearly identifies CA as a Canada benchmark.
+    for effect in ["job", "wage"]:
+        for channel in ["direct", "indirect", "induced"]:
+            canada[f"{channel}_within_{effect}"] = canada[
+                f"{channel}_all_{effect}"
+            ]
+
+    return canada
+
+
+def make_canada_occ_data(provincial_occ):
+    """Aggregate ten-province industry-occupation employment to PROV='CA'."""
+    source = provincial_occ.loc[
+        provincial_occ["PROV"].ne("CA")
+    ].copy()
+
+    source["emp"] = pd.to_numeric(source["emp"], errors="coerce")
+    source["totalemp_occ"] = pd.to_numeric(
+        source["totalemp_occ"],
+        errors="coerce",
+    )
+
+    canada = (
+        source.groupby(["IOIC", "NOC3DIG"], as_index=False)
+        .agg(emp=("emp", "sum"))
+    )
+    canada["totalemp_ind"] = (
+        canada.groupby("IOIC")["emp"].transform("sum")
+    )
+    canada["occshare"] = np.where(
+        canada["totalemp_ind"].gt(0),
+        canada["emp"] / canada["totalemp_ind"],
+        np.nan,
+    )
+
+    # totalemp_occ is repeated across industries in the source. Retain one
+    # observation per province x occupation before summing the ten provinces.
+    national_occ_totals = (
+        source[["PROV", "NOC3DIG", "totalemp_occ"]]
+        .drop_duplicates(["PROV", "NOC3DIG"])
+        .groupby("NOC3DIG", as_index=False)
+        .agg(totalemp_occ=("totalemp_occ", "sum"))
+    )
+    canada = canada.merge(
+        national_occ_totals,
+        on="NOC3DIG",
+        how="left",
+        validate="many_to_one",
+    )
+    canada["PROV"] = "CA"
+    canada["zero_industry_employment"] = canada["totalemp_ind"].fillna(0).eq(0)
+
+    return canada[
+        [
+            "PROV",
+            "IOIC",
+            "NOC3DIG",
+            "emp",
+            "occshare",
+            "totalemp_occ",
+            "zero_industry_employment",
+        ]
+    ]
+
+
+def make_canada_supply_data(provincial_supply):
+    """Create a ten-province national labour-market benchmark by occupation."""
+    source = provincial_supply.loc[
+        provincial_supply["PROV"].ne("CA")
+    ].copy()
+
+    numeric_cols = [
+        "employed",
+        "unemployed",
+        "unemprate",
+        "highageshare",
+        "earn_mean",
+        "vacancies",
+        "vacancy rate",
+    ]
+    for col in numeric_cols:
+        source[col] = pd.to_numeric(source[col], errors="coerce")
+
+    rows = []
+    for noc, group in source.groupby("NOC3DIG", dropna=False):
+        employed = group["employed"].sum(min_count=1)
+        unemployed = group["unemployed"].sum(min_count=1)
+        labour_force = employed + unemployed
+        unemprate = (
+            unemployed / labour_force * 100
+            if pd.notna(labour_force) and labour_force > 0
+            else np.nan
+        )
+
+        rows.append(
+            {
+                "PROV": "CA",
+                "NOC3DIG": noc,
+                "employed": employed,
+                "unemployed": unemployed,
+                "unemprate": unemprate,
+                "highageshare": weighted_mean(
+                    group["highageshare"],
+                    group["employed"],
+                ),
+                "earn_mean": weighted_mean(
+                    group["earn_mean"],
+                    group["employed"],
+                ),
+                "vacancies": group["vacancies"].sum(min_count=1),
+                "vacancy rate": weighted_mean(
+                    group["vacancy rate"],
+                    group["employed"],
+                ),
+                "vacancy_suppressed": group["vacancies"].notna().sum() == 0,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def append_canada_benchmark(
+    industry_data,
+    occ_data,
+    supply_data,
+    canada_multipliers,
+):
+    """Append official Canada multipliers and ten-province aggregates."""
+    canada_occ = make_canada_occ_data(occ_data)
+    canada_supply = make_canada_supply_data(supply_data)
+
+    canada_industry_totals = (
+        canada_occ.groupby("IOIC", as_index=False)
+        .agg(totalemp_ind=("emp", "sum"))
+    )
+
+    canada_industry = canada_multipliers.merge(
+        canada_industry_totals,
+        on="IOIC",
+        how="left",
+        validate="one_to_one",
+    )
+
+    industry_cols = ["PROV", "IOIC", "totalemp_ind"] + MULTIPLIER_COLS
+    canada_industry = canada_industry[industry_cols]
+
+    industry_out = pd.concat(
+        [industry_data, canada_industry],
+        ignore_index=True,
+    )
+    occ_out = pd.concat([occ_data, canada_occ], ignore_index=True)
+    supply_out = pd.concat([supply_data, canada_supply], ignore_index=True)
+
+    unmatched_canada_industries = canada_industry.loc[
+        canada_industry["totalemp_ind"].isna(),
+        ["PROV", "IOIC"],
+    ].copy()
+
+    provincial_industries = set(
+        occ_data["IOIC"].dropna().astype(str).str.strip()
+    )
+    multiplier_industries = set(
+        canada_multipliers["IOIC"].dropna().astype(str).str.strip()
+    )
+    missing_canada_multipliers = sorted(
+        provincial_industries - multiplier_industries
+    )
+
+    return (
+        industry_out,
+        occ_out,
+        supply_out,
+        unmatched_canada_industries,
+        missing_canada_multipliers,
+    )
+
 # ============================================================
 # CORE STATIC LAMP ENGINE
 # ============================================================
@@ -1105,29 +1363,26 @@ def make_saved_plan(plan, industry_data):
 
 def make_provincial_cops(cops_data, supply_data):
     """
-    Allocate national COPS occupation flows to provinces using
-    each province's share of current Canadian employment in the
-    corresponding occupation.
+    Allocate national COPS flows to the ten provinces by current employment
+    share, then append an unallocated national CA benchmark.
     """
-    employment = supply_data[
-        ["PROV", "NOC3DIG", "employed"]
+    provincial_supply = supply_data.loc[
+        supply_data["PROV"].ne("CA")
     ].copy()
 
+    employment = provincial_supply[
+        ["PROV", "NOC3DIG", "employed"]
+    ].copy()
     employment["employed"] = pd.to_numeric(
         employment["employed"],
         errors="coerce",
     )
-
     employment["national_employment"] = (
-        employment
-        .groupby("NOC3DIG")["employed"]
-        .transform("sum")
+        employment.groupby("NOC3DIG")["employed"].transform("sum")
     )
-
     employment["provincial_employment_share"] = np.where(
         employment["national_employment"].gt(0),
-        employment["employed"]
-        / employment["national_employment"],
+        employment["employed"] / employment["national_employment"],
         np.nan,
     )
 
@@ -1157,14 +1412,30 @@ def make_provincial_cops(cops_data, supply_data):
         "total_baseline_openings",
         "baseline_balance",
     ]
-
     for col in flow_cols:
         provincial_cops[col] = (
             provincial_cops[col]
             * provincial_cops["provincial_employment_share"]
         )
 
-    return provincial_cops
+    national_employment = (
+        provincial_supply.groupby("NOC3DIG", as_index=False)
+        .agg(national_employment=("employed", "sum"))
+    )
+    canada_cops = cops_data.merge(
+        national_employment,
+        on="NOC3DIG",
+        how="left",
+        validate="many_to_one",
+    )
+    canada_cops["PROV"] = "CA"
+    canada_cops["provincial_employment_share"] = 1.0
+
+    return pd.concat(
+        [provincial_cops, canada_cops],
+        ignore_index=True,
+        sort=False,
+    )
 
 def validate_uploaded_plan(plan, industry_data):
     """
@@ -1389,7 +1660,16 @@ if "timeline_results" not in st.session_state:
 # ============================================================
 
 try:
-    raw, labour, demographics, wages, noc_titles, vacancies, raw_cops = load_data()
+    (
+        raw,
+        labour,
+        demographics,
+        wages,
+        noc_titles,
+        vacancies,
+        raw_cops,
+        raw_canada_multipliers,
+    ) = load_data()
 
     (
         df,
@@ -1408,6 +1688,21 @@ try:
 
     noc_titles = prepare_noc_titles(noc_titles)
     cops_data = prepare_cops(raw_cops)
+    canada_multipliers = prepare_canada_multipliers(
+        raw_canada_multipliers
+    )
+    (
+        industry_data,
+        occ_data,
+        supply_data,
+        unmatched_canada_industries,
+        missing_canada_multipliers,
+    ) = append_canada_benchmark(
+        industry_data,
+        occ_data,
+        supply_data,
+        canada_multipliers,
+    )
     provincial_cops = make_provincial_cops(cops_data, supply_data)
 except Exception as exc:
     st.error(f"Could not prepare the data: {exc}")
@@ -1422,8 +1717,9 @@ except Exception as exc:
 # ------------------------------------------------------------
 
 cops_share_check = (
-    provincial_cops[
-        ["NOC3DIG", "PROV", "provincial_employment_share"]
+    provincial_cops.loc[
+        provincial_cops["PROV"].ne("CA"),
+        ["NOC3DIG", "PROV", "provincial_employment_share"],
     ]
     .drop_duplicates()
     .groupby("NOC3DIG", as_index=False)
@@ -1490,6 +1786,9 @@ with st.expander("Method and interpretation"):
 - The post-project balance subtracts LAMP direct occupational requirements from the baseline COPS balance.
 - COPS "other inflows" include occupational mobility, net re-entry, and other adjustments and are not interpreted as an independently available worker pool.
 - COPS-adjusted balances are accounting pressure indicators, not equilibrium shortage forecasts.
+- **Canada benchmark** uses official Canada-level all-provinces multipliers and occupational/labour-market aggregates constructed from the ten provincial source files.
+- Canada has no separate "within province" multiplier. CA rows always use the official all-provinces multiplier values.
+- The Canada benchmark excludes the territories from the aggregated employment, unemployment, wage, vacancy, demographic, and occupational-share inputs.
         """
     )
 
@@ -1526,6 +1825,20 @@ else:
         "have no matching COPS flow data."
     )
 
+if unmatched_canada_industries.empty:
+    st.sidebar.success("Canada multiplier-industry matching passed.")
+else:
+    st.sidebar.warning(
+        f"{len(unmatched_canada_industries):,} Canada multiplier industries "
+        "have no matching ten-province occupational structure."
+    )
+
+if missing_canada_multipliers:
+    st.sidebar.warning(
+        f"{len(missing_canada_multipliers):,} industries in the provincial "
+        "occupational data have no Canada-level multiplier."
+    )
+
 provinces = (
     industry_data["PROV"]
     .dropna()
@@ -1533,6 +1846,13 @@ provinces = (
     .drop_duplicates()
     .tolist()
 )
+provinces = sorted(
+    provinces,
+    key=lambda code: (code != "CA", code),
+)
+province_labels = {
+    "CA": "Canada benchmark (10-province labour context)",
+}
 
 
 # ============================================================
@@ -1556,8 +1876,15 @@ if scenario_mode == "Static scenario":
     selected_prov = st.sidebar.selectbox(
         "Province",
         provinces,
+        format_func=lambda code: province_labels.get(code, code),
         key="static_province",
     )
+
+    if selected_prov == "CA":
+        st.sidebar.caption(
+            "Canada benchmark uses official national all-provinces multipliers "
+            "and labour-market aggregates from the ten provinces."
+        )
 
     valid_ioics = (
         industry_data.loc[
@@ -1636,6 +1963,11 @@ if scenario_mode == "Static scenario":
             key="static_scope",
         )
         geography = "within" if scope == "Within province" else "all"
+        if st.session_state["scenario_rows"]["PROV"].eq("CA").any():
+            st.caption(
+                "Canada benchmark rows use official all-provinces multipliers "
+                "regardless of this scope selection."
+            )
 
         if st.button("Run static scenario", type="primary", width="stretch"):
             try:
@@ -1876,6 +2208,7 @@ if scenario_mode == "Static scenario":
                         "Industry results": results["industry"],
                         "Occupation and supply": results["occupation"],
                         "Supply source": supply_data,
+                        "Canada multipliers": canada_multipliers,
                     }
                 )
                 st.download_button(
@@ -1988,8 +2321,15 @@ if scenario_mode == "Project timeline":
     timeline_prov = st.sidebar.selectbox(
         "Province",
         provinces,
+        format_func=lambda code: province_labels.get(code, code),
         key="timeline_province",
     )
+
+    if timeline_prov == "CA":
+        st.sidebar.caption(
+            "Canada benchmark uses official national all-provinces multipliers "
+            "and labour-market aggregates from the ten provinces."
+        )
 
     timeline_ioics = (
         industry_data.loc[
@@ -2083,6 +2423,11 @@ if scenario_mode == "Project timeline":
         timeline_geography = (
             "within" if timeline_scope == "Within province" else "all"
         )
+        if st.session_state["timeline_rows"]["PROV"].eq("CA").any():
+            st.caption(
+                "Canada benchmark rows use official all-provinces multipliers "
+                "regardless of this scope selection."
+            )
 
         if st.button("Run project pipeline", type="primary", width="stretch"):
             try:
@@ -2305,7 +2650,7 @@ if scenario_mode == "Project timeline":
                                 "High-age share (%)", format="%.2f"
                             ),
                             "earn_mean": st.column_config.NumberColumn(
-                                "Average hourly wage", format="$%.2f"
+                                "Average hourly wage", format="$%,.0f"
                             ),
                         },
                     )
@@ -2379,8 +2724,9 @@ if scenario_mode == "Project timeline":
                     st.subheader("Labour-market balance with project demand")
 
                     st.caption(
-                        "National COPS flows are allocated to provinces based on "
-                        "each province's current share of employment in the occupation. "
+                        "National COPS flows are used directly for CA and allocated "
+                        "to provinces based on each province's current share of "
+                        "ten-province employment in the occupation. "
                         "A negative balance indicates that projected openings and LAMP "
                         "requirements exceed projected inflows. This is an accounting "
                         "pressure indicator, not a behavioural shortage forecast."
@@ -2821,7 +3167,7 @@ if scenario_mode == "Project timeline":
                         "NOC3DIG": "NOC",
                         "title": "Occupation",
                         "new_jobs": st.column_config.NumberColumn(
-                            "Direct jobs", format="%.0f"
+                            "Direct jobs", format="%,.0f"
                         ),
                     },
                 )
@@ -2836,7 +3182,8 @@ if scenario_mode == "Project timeline":
                         "COPS balance peaks": timeline_results["cops_peak_occupation"],
                         "Industry by project": timeline_results["industry_by_project"],
                         "Occupation by project": timeline_results["occupation_by_project"],
-                        "Provincial COPS": provincial_cops,
+                        "Provincial and CA COPS": provincial_cops,
+                        "Canada multipliers": canada_multipliers,
                     }
                 )
 
