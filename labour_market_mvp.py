@@ -1823,7 +1823,6 @@ else:
     st.sidebar.warning(
         f"{len(missing_cops_nocs):,} LAMP occupation groups "
         "have no matching COPS flow data."
-        + ", ".join(missing_cops_nocs)
     )
 
 if unmatched_canada_industries.empty:
@@ -1837,8 +1836,7 @@ else:
 if missing_canada_multipliers:
     st.sidebar.warning(
         f"{len(missing_canada_multipliers):,} industries in the provincial "
-        "occupational data have no Canada-level multiplier: "
-        + "; ".join(missing_canada_multipliers)
+        "occupational data have no Canada-level multiplier."
     )
 
 provinces = (
@@ -2872,6 +2870,11 @@ if scenario_mode == "Project timeline":
                         .copy()
                     )
 
+                    chart_data["total_demand_with_lamp"] = (
+                        chart_data["total_baseline_openings"]
+                        + chart_data["new_jobs"]
+                    )
+
                     if chart_data.empty:
 
                         st.info(
@@ -2898,6 +2901,9 @@ if scenario_mode == "Project timeline":
                             "NOC3DIG",
                             "title",
                             "fiscal_year",
+                            "total_baseline_openings",
+                            "new_jobs",
+                            "total_demand_with_lamp",
                         ],
                         value_vars=[
                             "baseline_balance",
@@ -2962,6 +2968,23 @@ if scenario_mode == "Project timeline":
                                 alt.Tooltip(
                                     "balance_type:N",
                                     title="Scenario",
+                                ),
+
+                                alt.Tooltip(
+                                    "total_baseline_openings:Q",
+                                    title="Baseline demand",
+                                    format=",.0f",
+                                ),
+
+                                alt.Tooltip(
+                                    "new_jobs:Q",
+                                    title="Additional LAMP demand",
+                                    format=",.0f",
+                                ),
+                                alt.Tooltip(
+                                    "total_demand_with_lamp:Q",
+                                    title="Total demand with LAMP",
+                                    format=",.0f",
                                 ),
 
                                 alt.Tooltip(
