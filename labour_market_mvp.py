@@ -122,7 +122,7 @@ def load_data():
     wages = pd.read_excel(WAGES_FILE, engine="openpyxl")
     noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
     vacancies = pd.read_excel(VACANCIES_FILE, engine="openpyxl")
-    cops = pd.read_excel(COPS_FILE, engine="openpyxl")
+    cops = pd.read_excel(COPS_FILE, engine="openpxyl")
     return demand, labour, demographics, wages, noc_titles, vacancies, cops
 
 
@@ -2357,281 +2357,281 @@ if scenario_mode == "Project timeline":
     # COPS DATA
     # ========================================================
 
-    cops_view = timeline_results["annual_occupation"].copy()
+                cops_view = timeline_results["annual_occupation"].copy()
 
     # Keep only rows with COPS data
-    cops_view = cops_view.loc[
-        cops_view["cops_available"].eq(True)
-    ].copy()
+                cops_view = cops_view.loc[
+                    cops_view["cops_available"].eq(True)
+                ].copy()
 
-    if cops_view.empty:
-        st.info(
-            "No COPS projections are available for the fiscal years "
-            "included in this project scenario."
-        )
+                if cops_view.empty:
+                    st.info(
+                        "No COPS projections are available for the fiscal years "
+                        "included in this project scenario."
+                    )
 
-    else:
+                else:
 
         # ====================================================
         # TABLE
         # ====================================================
 
-        st.subheader("Labour-market balance with project demand")
+                    st.subheader("Labour-market balance with project demand")
 
-        st.caption(
-            "National COPS flows are allocated to provinces based on "
-            "each province's current share of employment in the occupation. "
-            "A negative balance indicates that projected openings and LAMP "
-            "requirements exceed projected inflows. This is an accounting "
-            "pressure indicator, not a behavioural shortage forecast."
-        )
+                    st.caption(
+                        "National COPS flows are allocated to provinces based on "
+                        "each province's current share of employment in the occupation. "
+                        "A negative balance indicates that projected openings and LAMP "
+                        "requirements exceed projected inflows. This is an accounting "
+                        "pressure indicator, not a behavioural shortage forecast."
+                    )
 
-        status_options = [
-            "All occupations",
-            "Moves into deficit with projects",
-            "Existing deficit worsens",
-            "Projected inflows cover openings",
-        ]
+                    status_options = [
+                        "All occupations",
+                        "Moves into deficit with projects",
+                        "Existing deficit worsens",
+                        "Projected inflows cover openings",
+                    ]
 
-        selected_status = st.selectbox(
-            "Balance status",
-            status_options,
-            key="cops_balance_status",
-        )
+                    selected_status = st.selectbox(
+                        "Balance status",
+                        status_options,
+                        key="cops_balance_status",
+                    )
 
-        if selected_status != "All occupations":
-            cops_view = cops_view.loc[
-                cops_view["balance_status"].eq(selected_status)
-            ].copy()
+                    if selected_status != "All occupations":
+                        cops_view = cops_view.loc[
+                            cops_view["balance_status"].eq(selected_status)
+                        ].copy()
 
-        cops_display = cops_view[
-            [
-                "PROV",
-                "fiscal_year",
-                "NOC3DIG",
-                "title",
-                "school_inflow",
-                "immigrant_inflow",
-                "other_inflow",
-                "total_inflows",
-                "total_baseline_openings",
-                "baseline_balance",
-                "new_jobs",
-                "post_project_balance",
-                "post_project_gap",
-                "post_project_gap_pct",
-                "balance_status",
-            ]
-        ].sort_values(
-            ["post_project_gap", "new_jobs"],
-            ascending=[False, False],
-        )
+                    cops_display = cops_view[
+                        [
+                            "PROV",
+                            "fiscal_year",
+                            "NOC3DIG",
+                            "title",
+                            "school_inflow",
+                            "immigrant_inflow",
+                            "other_inflow",
+                            "total_inflows",
+                            "total_baseline_openings",
+                            "baseline_balance",
+                            "new_jobs",
+                            "post_project_balance",
+                            "post_project_gap",
+                            "post_project_gap_pct",
+                            "balance_status",
+                        ]
+                    ].sort_values(
+                        ["post_project_gap", "new_jobs"],
+                        ascending=[False, False],
+                    )
 
-        st.dataframe(
-            cops_display,
-            hide_index=True,
-            width="stretch",
-            column_config={
-                "PROV": "Province",
-                "fiscal_year": "Fiscal year",
-                "NOC3DIG": "NOC",
-                "title": "Occupation",
+                    st.dataframe(
+                        cops_display,
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "PROV": "Province",
+                            "fiscal_year": "Fiscal year",
+                            "NOC3DIG": "NOC",
+                            "title": "Occupation",
 
-                "school_inflow": st.column_config.NumberColumn(
-                    "School inflow",
-                    format="%,.0f",
-                ),
+                            "school_inflow": st.column_config.NumberColumn(
+                                "School inflow",
+                                format="%,.0f",
+                            ),
 
-                "immigrant_inflow": st.column_config.NumberColumn(
-                    "Immigrant inflow",
-                    format="%,.0f",
-                ),
+                            "immigrant_inflow": st.column_config.NumberColumn(
+                                "Immigrant inflow",
+                                format="%,.0f",
+                            ),
 
-                "other_inflow": st.column_config.NumberColumn(
-                    "Other inflow",
-                    format="%,.0f",
-                ),
+                            "other_inflow": st.column_config.NumberColumn(
+                                "Other inflow",
+                                format="%,.0f",
+                            ),
 
-                "total_inflows": st.column_config.NumberColumn(
-                    "Total projected inflows",
-                    format="%,.0f",
-                ),
+                            "total_inflows": st.column_config.NumberColumn(
+                                "Total projected inflows",
+                                format="%,.0f",
+                            ),
 
-                "total_baseline_openings": st.column_config.NumberColumn(
-                    "Baseline openings",
-                    format="%,.0f",
-                ),
+                            "total_baseline_openings": st.column_config.NumberColumn(
+                                "Baseline openings",
+                                format="%,.0f",
+                            ),
 
-                "baseline_balance": st.column_config.NumberColumn(
-                    "Baseline balance",
-                    format="%,.0f",
-                ),
+                            "baseline_balance": st.column_config.NumberColumn(
+                                "Baseline balance",
+                                format="%,.0f",
+                            ),
 
-                "new_jobs": st.column_config.NumberColumn(
-                    "LAMP direct demand",
-                    format="%,.0f",
-                ),
+                            "new_jobs": st.column_config.NumberColumn(
+                                "LAMP direct demand",
+                                format="%,.0f",
+                            ),
 
-                "post_project_balance": st.column_config.NumberColumn(
-                    "Balance with projects",
-                    format="%,.0f",
-                ),
+                            "post_project_balance": st.column_config.NumberColumn(
+                                "Balance with projects",
+                                format="%,.0f",
+                            ),
 
-                "post_project_gap": st.column_config.NumberColumn(
-                    "Potential gap",
-                    format="%,.0f",
-                ),
+                            "post_project_gap": st.column_config.NumberColumn(
+                                "Potential gap",
+                                format="%,.0f",
+                            ),
 
-                "post_project_gap_pct": st.column_config.NumberColumn(
-                    "Potential gap / workforce (%)",
-                    format="%.2f",
-                ),
+                            "post_project_gap_pct": st.column_config.NumberColumn(
+                                "Potential gap / workforce (%)",
+                                format="%.2f",
+                            ),
 
-                "balance_status": "Status",
-            },
-        )
+                            "balance_status": "Status",
+                        },
+                    )
 
         # ====================================================
         # CHART
         # ====================================================
 
-        st.subheader("Effect of projects on occupational balance")
+                    st.subheader("Effect of projects on occupational balance")
 
-        available_cops_years = (
-            cops_view["fiscal_year"]
-            .dropna()
-            .drop_duplicates()
-            .tolist()
-        )
-
-        if available_cops_years:
-
-            selected_cops_year = st.selectbox(
-                "Fiscal year",
-                available_cops_years,
-                key="cops_year_selector",
-            )
-
-            chart_data = (
-                cops_view.loc[
-                    cops_view["fiscal_year"].eq(selected_cops_year)
-                    & cops_view["post_project_balance"].notna()
-                ]
-                .nsmallest(
-                    15,
-                    "post_project_balance",
-                )
-                .copy()
-            )
-
-            if chart_data.empty:
-
-                st.info(
-                    "No COPS balance results are available for "
-                    f"{selected_cops_year}."
-                )
-
-            else:
-
-                chart_data["label"] = (
-                    chart_data["PROV"]
-                    + " | NOC "
-                    + chart_data["NOC3DIG"].astype(str)
-                    + " | "
-                    + chart_data["title"].fillna(
-                        "Unknown occupation"
+                    available_cops_years = (
+                        cops_view["fiscal_year"]
+                        .dropna()
+                        .drop_duplicates()
+                        .tolist()
                     )
-                )
 
-                balance_long = chart_data.melt(
-                    id_vars=[
-                        "label",
-                        "PROV",
-                        "NOC3DIG",
-                        "title",
-                        "fiscal_year",
-                    ],
-                    value_vars=[
-                        "baseline_balance",
-                        "post_project_balance",
-                    ],
-                    var_name="balance_type",
-                    value_name="workers",
-                )
+                    if available_cops_years:
 
-                balance_long["balance_type"] = (
-                    balance_long["balance_type"].map(
-                        {
-                            "baseline_balance":
-                                "COPS baseline",
-                            "post_project_balance":
-                                "With LAMP projects",
-                        }
+                        selected_cops_year = st.selectbox(
+                            "Fiscal year",
+                            available_cops_years,
+                            key="cops_year_selector",
                     )
+
+                    chart_data = (
+                        cops_view.loc[
+                            cops_view["fiscal_year"].eq(selected_cops_year)
+                            & cops_view["post_project_balance"].notna()
+                        ]
+                        .nsmallest(
+                            15,
+                            "post_project_balance",
+                            )
+                        .copy()
+                    )
+
+                    if chart_data.empty:
+
+                        st.info(
+                            "No COPS balance results are available for "
+                            f"{selected_cops_year}."
+                        )
+
+                    else:
+
+                        chart_data["label"] = (
+                            chart_data["PROV"]
+                            + " | NOC "
+                            + chart_data["NOC3DIG"].astype(str)
+                            + " | "
+                            + chart_data["title"].fillna(
+                                "Unknown occupation"
+                        )
                 )
 
-                balance_chart = (
-                    alt.Chart(balance_long)
-                    .mark_bar()
-                    .encode(
-                        x=alt.X(
-                            "workers:Q",
-                            title=(
-                                "Projected labour-market "
-                                "balance (workers)"
-                            ),
-                        ),
-
-                        y=alt.Y(
-                            "label:N",
-                            title=None,
-                            axis=alt.Axis(
-                                labelLimit=550
-                            ),
-                        ),
-
-                        color=alt.Color(
-                            "balance_type:N",
-                            title=None,
-                        ),
-
-                        tooltip=[
-                            alt.Tooltip(
-                                "PROV:N",
-                                title="Province",
-                            ),
-
-                            alt.Tooltip(
-                                "NOC3DIG:N",
-                                title="NOC",
-                            ),
-
-                            alt.Tooltip(
-                                "title:N",
-                                title="Occupation",
-                            ),
-
-                            alt.Tooltip(
-                                "balance_type:N",
-                                title="Scenario",
-                            ),
-
-                            alt.Tooltip(
-                                "workers:Q",
-                                title="Balance",
-                                format=",.0f",
-                            ),
+                    balance_long = chart_data.melt(
+                        id_vars=[
+                            "label",
+                            "PROV",
+                            "NOC3DIG",
+                            "title",
+                            "fiscal_year",
                         ],
+                        value_vars=[
+                            "baseline_balance",
+                            "post_project_balance",
+                        ],
+                        var_name="balance_type",
+                        value_name="workers",
                     )
-                    .properties(
-                        height=500
-                    )
-                )
 
-                st.altair_chart(
-                    balance_chart,
-                    width="stretch",
-                )
+                    balance_long["balance_type"] = (
+                        balance_long["balance_type"].map(
+                            {
+                                "baseline_balance":
+                                    "COPS baseline",
+                                    "post_project_balance":
+                                        "With LAMP projects",
+                            }
+                        )
+                    )
+
+                    balance_chart = (
+                        alt.Chart(balance_long)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X(
+                                "workers:Q",
+                                title=(
+                                    "Projected labour-market "
+                                    "balance (workers)"
+                                ),
+                            ),
+
+                            y=alt.Y(
+                                "label:N",
+                                title=None,
+                                axis=alt.Axis(
+                                    labelLimit=550
+                                ),
+                            ),
+                        
+                            color=alt.Color(
+                                "balance_type:N",
+                                title=None,
+                            ),
+
+                            tooltip=[
+                                alt.Tooltip(
+                                    "PROV:N",
+                                    title="Province",
+                                ),
+
+                                alt.Tooltip(
+                                    "NOC3DIG:N",
+                                    title="NOC",
+                                ),
+
+                                alt.Tooltip(
+                                    "title:N",
+                                    title="Occupation",
+                                ),
+
+                                alt.Tooltip(
+                                    "balance_type:N",
+                                    title="Scenario",
+                                ),
+
+                                alt.Tooltip(
+                                    "workers:Q",
+                                    title="Balance",
+                                    format=",.0f",
+                                ),
+                            ],
+                        )
+                        .properties(
+                            height=500
+                        )
+                    )
+
+                    st.altair_chart(
+                        balance_chart,
+                        width="stretch",
+                    )
             with occupation_time_tab:
                 annual_occ = timeline_results["annual_occupation"].copy()
                 annual_occ["display_name"] = (
