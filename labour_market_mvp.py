@@ -2499,7 +2499,7 @@ if scenario_mode == "Project timeline":
             st.header("Project pipeline results")
 
             timeline_summary = timeline_results["summary"]
-            tm = st.columns(4)
+            tm = st.columns(5)
             tm[0].metric(
                 "Total investment",
                 f"${timeline_summary['Total investment ($M)']:,.1f}M",
@@ -2509,10 +2509,14 @@ if scenario_mode == "Project timeline":
                 f"{timeline_summary['Number of projects']:,.0f}",
             )
             tm[2].metric(
+                "Total direct job-years",
+                f"{timeline_summary['Total direct job-years']:,.0f}",
+            )
+            tm[3].metric(
                 "Peak direct jobs",
                 f"{timeline_summary['Peak direct jobs']:,.0f}",
             )
-            tm[3].metric(
+            tm[4].metric(
                 "Peak direct-jobs year",
                 str(timeline_summary["Peak direct jobs FY"]),
             )
