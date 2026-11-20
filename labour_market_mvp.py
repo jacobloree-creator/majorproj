@@ -2562,14 +2562,6 @@ if scenario_mode == "Project timeline":
                     "those years."
                 )
 
-            if missing_cops_years:
-                st.warning(
-                    "COPS projections are unavailable for: "
-                    + ", ".join(missing_cops_years)
-                    + ". Labour-balance results are shown as missing for "
-                    "those years."
-                )
-
             overview_tab, peak_tab, cops_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
                 [
                     "Annual overview",
