@@ -2901,6 +2901,7 @@ if scenario_mode == "Project timeline":
                             "NOC3DIG",
                             "title",
                             "fiscal_year",
+                            "total_inflows",
                             "total_baseline_openings",
                             "new_jobs",
                             "total_demand_with_lamp",
