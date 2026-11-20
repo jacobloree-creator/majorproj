@@ -889,6 +889,32 @@ def run_scenario(
 
     detailed["new_jobs"] = detailed["direct_jobs"] * detailed["occshare"]
 
+    allocation_check = (
+        detailed
+        .groupby(
+            ["PROV", "IOIC"],
+            as_index=False,
+        )
+        .agg(
+            direct_jobs=("direct_jobs", "first"),
+            allocated_jobs=("new_jobs", "sum"),
+            occshare_sum=("occshare", "sum"),
+        )
+    )
+
+    allocation_check["difference"] = (
+        allocation_check["allocated_jobs"]
+        - allocation_check["direct_jobs"]
+    )
+
+    if detailed["PROV"].eq("CA").any():
+        st.write(
+            "CA occupational allocation check",
+            allocation_check.loc[
+                allocation_check["PROV"].eq("CA")
+            ]
+        )
+
     if detailed["PROV"].eq("CA").any():
         st.write(
             "CA occupation allocation check",
@@ -2553,6 +2579,14 @@ if scenario_mode == "Project timeline":
                 .dropna()
                 .tolist()
             )
+
+            if missing_cops_years:
+                st.warning(
+                    "COPS projections are unavailable for: "
+                    + ", ".join(missing_cops_years)
+                    + ". Labour-balance results are shown as missing for "
+                    "those years."
+                )
 
             if missing_cops_years:
                 st.warning(
