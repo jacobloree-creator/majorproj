@@ -1823,6 +1823,7 @@ else:
     st.sidebar.warning(
         f"{len(missing_cops_nocs):,} LAMP occupation groups "
         "have no matching COPS flow data."
+        + ", ".join(missing_cops_nocs)
     )
 
 if unmatched_canada_industries.empty:
@@ -1834,9 +1835,10 @@ else:
     )
 
 if missing_canada_multipliers:
-    st.sidebar.warning(
+st.sidebar.warning(
         f"{len(missing_canada_multipliers):,} industries in the provincial "
-        "occupational data have no Canada-level multiplier."
+        "occupational data have no Canada-level multiplier: "
+        + "; ".join(missing_canada_multipliers)
     )
 
 provinces = (
