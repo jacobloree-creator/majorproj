@@ -1123,30 +1123,7 @@ def run_timeline_scenario(
         "total_baseline_openings",
         "baseline_balance",
     ]
-    
-    if annual_occ["PROV"].eq("CA").any():
-        ca_debug = annual_occ.loc[
-            annual_occ["PROV"].eq("CA"),
-            [
-                "PROV",
-                "NOC3DIG",
-                "fiscal_year",
-                "new_jobs",
-                ]
-        ].copy()
 
-        ca_cops_debug = provincial_cops.loc[
-            provincial_cops["PROV"].eq("CA"),
-            [
-                "PROV",
-                "NOC3DIG",
-                "fiscal_year",
-                "baseline_balance",
-                ]
-        ].copy()
-
-        st.write("CA LAMP rows", ca_debug)
-        st.write("CA COPS rows", ca_cops_debug)
 
     annual_occ = annual_occ.merge(
         provincial_cops[cops_merge_cols],
