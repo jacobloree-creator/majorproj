@@ -889,50 +889,7 @@ def run_scenario(
 
     detailed["new_jobs"] = detailed["direct_jobs"] * detailed["occshare"]
 
-    allocation_check = (
-        detailed
-        .groupby(
-            ["PROV", "IOIC"],
-            as_index=False,
-        )
-        .agg(
-            direct_jobs=("direct_jobs", "first"),
-            allocated_jobs=("new_jobs", "sum"),
-            occshare_sum=("occshare", "sum"),
-        )
-    )
-
-    allocation_check["difference"] = (
-        allocation_check["allocated_jobs"]
-        - allocation_check["direct_jobs"]
-    )
-
-    if detailed["PROV"].eq("CA").any():
-        st.write(
-            "CA occupational allocation check",
-            allocation_check.loc[
-                allocation_check["PROV"].eq("CA")
-            ]
-        )
-
-    if detailed["PROV"].eq("CA").any():
-        st.write(
-            "CA occupation allocation check",
-            detailed.loc[
-                detailed["PROV"].eq("CA"),
-                [
-                    "IOIC",
-                    "NOC3DIG",
-                    "direct_jobs",
-                    "emp",
-                    "occshare",
-                    "new_jobs",
-                    ],
-                ].sort_values(
-                    "new_jobs",
-                    ascending=False,
-                    )
-                    )
+  
 
     occupation = (
         detailed.dropna(subset=["NOC3DIG", "new_jobs"])
@@ -2587,6 +2544,7 @@ if scenario_mode == "Project timeline":
                     + ". Labour-balance results are shown as missing for "
                     "those years."
                 )
+
 
             overview_tab, peak_tab, cops_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
                 [
