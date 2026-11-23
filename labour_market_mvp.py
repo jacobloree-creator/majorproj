@@ -34,6 +34,7 @@ NOC_TITLES_FILE = APP_DIR / "noc_titles.xlsx"
 VACANCIES_FILE = APP_DIR / "vacancies.xlsx"
 COPS_FILE = APP_DIR / "cops flows.xlsx"
 CANADA_MULTIPLIERS_FILE = APP_DIR / "canada_multipliers.xlsx"
+MOBILITY_FILE = APP_DIR / "switching_benchmarks_lamp_normalized.xlsx"
 
 REQUIRED_DEMAND_COLS = [
     "IOIC", "PROV", "NOC3DIG", "emp", "totalemp_ind", "occshare",
@@ -101,6 +102,19 @@ MULTIPLIER_COLS = [
     "direct_within_job", "indirect_within_job", "induced_within_job",
 ]
 
+REQUIRED_MOBILITY_COLS = [
+    "noc21",
+    "nocdest",
+    "skill_distance",
+    "between_3digit_switch",
+    "origin_between3_exit_rate_pct",
+    "lamp_destination_share",
+    "historical_between3_transition_rate",
+    "destination_rank_within_origin",
+    "source_rank_for_destination",
+    "skill_closeness_percentile_origin",
+]
+
 FISCAL_YEARS = [
     "2026-27", "2027-28", "2028-29", "2029-30", "2030-31",
     "2031-32", "2032-33", "2033-34", "2034-35", "2035-36",
@@ -134,6 +148,7 @@ def load_data():
     noc_titles = pd.read_excel(NOC_TITLES_FILE, engine="openpyxl")
     vacancies = pd.read_excel(VACANCIES_FILE, engine="openpyxl")
     cops = pd.read_excel(COPS_FILE, engine="openpyxl")
+    mobility = pd.read_excel(MOBILITY_FILE, engine="openpyxl")
     canada_multipliers = pd.read_excel(
         CANADA_MULTIPLIERS_FILE,
         engine="openpyxl",
@@ -146,6 +161,7 @@ def load_data():
         noc_titles,
         vacancies,
         cops,
+        mobility,
         canada_multipliers,
     )
 
@@ -298,6 +314,130 @@ def prepare_supply(labour, demographics, wages, vacancies):
 
     return supply
 
+def prepare_mobility(raw_mobility):
+    mobility = raw_mobility.copy()
+
+    require_columns(
+        mobility,
+        REQUIRED_MOBILITY_COLS,
+        MOBILITY_FILE.name,
+    )
+
+    # --------------------------------------------------------
+    # Standardize NOC codes
+    # --------------------------------------------------------
+
+    mobility["origin_NOC3DIG"] = (
+        mobility["noc21"]
+        .astype("string")
+        .str.strip()
+        .str.replace(r"\.0$", "", regex=True)
+        .str.zfill(3)
+    )
+
+    mobility["destination_NOC3DIG"] = (
+        mobility["nocdest"]
+        .astype("string")
+        .str.strip()
+        .str.replace(r"\.0$", "", regex=True)
+        .str.zfill(3)
+    )
+
+    # --------------------------------------------------------
+    # Numeric columns
+    # --------------------------------------------------------
+
+    numeric_cols = [
+        "skill_distance",
+        "between_3digit_switch",
+        "origin_between3_exit_rate_pct",
+        "lamp_destination_share",
+        "historical_between3_transition_rate",
+        "destination_rank_within_origin",
+        "source_rank_for_destination",
+        "skill_closeness_percentile_origin",
+    ]
+
+    mobility[numeric_cols] = mobility[numeric_cols].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+
+    # --------------------------------------------------------
+    # LAMP only uses movement across 3-digit occupations
+    # --------------------------------------------------------
+
+    mobility = mobility.loc[
+        mobility["between_3digit_switch"].eq(1)
+    ].copy()
+
+    # Belt-and-suspenders check
+    mobility = mobility.loc[
+        mobility["origin_NOC3DIG"].ne(
+            mobility["destination_NOC3DIG"]
+        )
+    ].copy()
+
+    # --------------------------------------------------------
+    # Validation
+    # --------------------------------------------------------
+
+    if mobility[
+        [
+            "origin_NOC3DIG",
+            "destination_NOC3DIG",
+        ]
+    ].duplicated().any():
+
+        dupes = mobility.loc[
+            mobility[
+                [
+                    "origin_NOC3DIG",
+                    "destination_NOC3DIG",
+                ]
+            ].duplicated(keep=False),
+            [
+                "origin_NOC3DIG",
+                "destination_NOC3DIG",
+            ],
+        ]
+
+        raise ValueError(
+            "Duplicate origin x destination pairs in mobility data:\n"
+            + dupes.to_string(index=False)
+        )
+
+    # Conditional destination shares should sum to one
+    share_check = (
+        mobility
+        .groupby(
+            "origin_NOC3DIG",
+            as_index=False,
+        )
+        .agg(
+            destination_share_sum=(
+                "lamp_destination_share",
+                "sum",
+            )
+        )
+    )
+
+    bad_shares = share_check.loc[
+        ~np.isclose(
+            share_check["destination_share_sum"],
+            1,
+            atol=0.001,
+        )
+    ]
+
+    if not bad_shares.empty:
+        raise ValueError(
+            "Mobility destination shares do not sum to 1 "
+            "for some origin occupations:\n"
+            + bad_shares.to_string(index=False)
+        )
+
+    return mobility
 
 def prepare_noc_titles(noc_titles):
     require_columns(noc_titles, REQUIRED_NOC_TITLE_COLS, NOC_TITLES_FILE.name)
@@ -957,6 +1097,273 @@ def run_scenario(
     }
 
 
+def build_mobility_sources(
+    annual_occ,
+    mobility_data,
+    supply_data,
+    provincial_cops,
+    noc_titles,
+):
+    """
+    Construct diagnostic occupational-mobility relationships.
+
+    Historical mobility benchmarks apply empirical U.S. bilateral
+    transition rates to the Canadian/provincial employment of the
+    source occupation. They are benchmarks, not forecasts of the
+    number of workers available to projects.
+    """
+
+    # --------------------------------------------------------
+    # Destination occupation demand from the LAMP scenario
+    # --------------------------------------------------------
+
+    destination_context = annual_occ[
+        [
+            "PROV",
+            "fiscal_year",
+            "NOC3DIG",
+            "title",
+            "new_jobs",
+            "baseline_balance",
+            "post_project_balance",
+            "post_project_gap",
+            "post_project_gap_pct",
+            "cops_available",
+        ]
+    ].copy()
+
+    destination_context = destination_context.rename(
+        columns={
+            "NOC3DIG": "destination_NOC3DIG",
+            "title": "destination_title",
+            "new_jobs": "lamp_demand",
+            "baseline_balance": "destination_baseline_balance",
+            "post_project_balance": "destination_post_project_balance",
+            "post_project_gap": "destination_post_project_gap",
+            "post_project_gap_pct": "destination_post_project_gap_pct",
+            "cops_available": "destination_cops_available",
+        }
+    )
+
+    # --------------------------------------------------------
+    # Expand each destination over possible source occupations
+    # --------------------------------------------------------
+
+    sources = destination_context.merge(
+        mobility_data,
+        on="destination_NOC3DIG",
+        how="left",
+        validate="many_to_many",
+    )
+
+    # --------------------------------------------------------
+    # Source occupation titles
+    # --------------------------------------------------------
+
+    origin_titles = noc_titles.rename(
+        columns={
+            "NOC3DIG": "origin_NOC3DIG",
+            "title": "origin_title",
+        }
+    )
+
+    sources = sources.merge(
+        origin_titles,
+        on="origin_NOC3DIG",
+        how="left",
+        validate="many_to_one",
+    )
+
+    # --------------------------------------------------------
+    # Current source-occupation employment and supply context
+    # --------------------------------------------------------
+
+    origin_supply = supply_data[
+        [
+            "PROV",
+            "NOC3DIG",
+            "employed",
+            "unemployed",
+            "unemprate",
+            "vacancies",
+            "vacancy rate",
+            "earn_mean",
+            "highageshare",
+        ]
+    ].copy()
+
+    origin_supply = origin_supply.rename(
+        columns={
+            "NOC3DIG": "origin_NOC3DIG",
+            "employed": "origin_employed",
+            "unemployed": "origin_unemployed",
+            "unemprate": "origin_unemployment_rate",
+            "vacancies": "origin_vacancies",
+            "vacancy rate": "origin_vacancy_rate",
+            "earn_mean": "origin_average_wage",
+            "highageshare": "origin_highage_share",
+        }
+    )
+
+    sources = sources.merge(
+        origin_supply,
+        on=["PROV", "origin_NOC3DIG"],
+        how="left",
+        validate="many_to_one",
+    )
+
+    # --------------------------------------------------------
+    # Source occupation COPS context by geography and year
+    # --------------------------------------------------------
+
+    origin_cops = provincial_cops[
+        [
+            "PROV",
+            "NOC3DIG",
+            "fiscal_year",
+            "baseline_balance",
+        ]
+    ].copy()
+
+    origin_cops = origin_cops.rename(
+        columns={
+            "NOC3DIG": "origin_NOC3DIG",
+            "baseline_balance": "origin_baseline_balance",
+        }
+    )
+
+    sources = sources.merge(
+        origin_cops,
+        on=[
+            "PROV",
+            "fiscal_year",
+            "origin_NOC3DIG",
+        ],
+        how="left",
+        validate="many_to_one",
+    )
+
+    sources["origin_cops_available"] = (
+        sources["origin_baseline_balance"].notna()
+    )
+
+    # At this stage, source occupations are not assigned additional
+    # LAMP demand. Therefore source post-project condition equals the
+    # COPS baseline condition. A later allocation model will update it.
+    sources["origin_post_project_balance"] = (
+        sources["origin_baseline_balance"]
+    )
+
+    sources["origin_post_project_gap"] = (
+        -sources["origin_post_project_balance"]
+    ).clip(lower=0)
+
+    sources["origin_post_project_gap_pct"] = np.where(
+        sources["origin_employed"].gt(0),
+        sources["origin_post_project_gap"]
+        / sources["origin_employed"]
+        * 100,
+        np.nan,
+    )
+
+    # --------------------------------------------------------
+    # Historical mobility benchmark
+    # --------------------------------------------------------
+
+    sources["historical_mobility_benchmark"] = (
+        sources["origin_employed"]
+        * sources["historical_between3_transition_rate"]
+    )
+
+    # --------------------------------------------------------
+    # Empirical source percentile within destination
+    # --------------------------------------------------------
+
+    source_counts = (
+        sources.groupby(
+            [
+                "PROV",
+                "fiscal_year",
+                "destination_NOC3DIG",
+            ]
+        )["origin_NOC3DIG"]
+        .transform("nunique")
+    )
+
+    sources["empirical_source_percentile"] = np.where(
+        source_counts.gt(1)
+        & sources["source_rank_for_destination"].notna(),
+        100
+        * (
+            1
+            - (
+                sources["source_rank_for_destination"] - 1
+            )
+            / (source_counts - 1)
+        ),
+        np.nan,
+    )
+
+    # --------------------------------------------------------
+    # Descriptive empirical/skill classification
+    # --------------------------------------------------------
+
+    strong_empirical = (
+        sources["empirical_source_percentile"].ge(75)
+    )
+
+    skill_close = (
+        sources["skill_closeness_percentile_origin"].ge(75)
+    )
+
+    sources["mobility_class"] = np.select(
+        [
+            strong_empirical & skill_close,
+            strong_empirical,
+            skill_close,
+        ],
+        [
+            "Strong potential source",
+            "Empirically observed",
+            "Skill-compatible",
+        ],
+        default="Weak source",
+    )
+
+    # --------------------------------------------------------
+    # Source labour-market condition
+    # --------------------------------------------------------
+
+    sources["source_condition"] = np.select(
+        [
+            sources["origin_cops_available"].ne(True),
+            sources["origin_post_project_gap_pct"].gt(3),
+            sources["origin_post_project_gap_pct"].gt(0),
+            sources["origin_post_project_balance"].ge(0),
+        ],
+        [
+            "COPS unavailable",
+            "High source pressure",
+            "Source occupation in deficit",
+            "No projected deficit",
+        ],
+        default="Unknown",
+    )
+
+    # --------------------------------------------------------
+    # Compare empirical benchmark with destination LAMP demand
+    # --------------------------------------------------------
+
+    sources["mobility_benchmark_vs_lamp_pct"] = np.where(
+        sources["lamp_demand"].gt(0),
+        sources["historical_mobility_benchmark"]
+        / sources["lamp_demand"]
+        * 100,
+        np.nan,
+    )
+
+    return sources
+
 # ============================================================
 # TIMELINE / PROJECT PIPELINE ENGINE
 # ============================================================
@@ -968,6 +1375,7 @@ def run_timeline_scenario(
     supply_data,
     noc_titles,
     provincial_cops,
+    mobility_data,
     geography="within",
 ):
     timeline = timeline.copy()
@@ -1205,6 +1613,24 @@ def run_timeline_scenario(
     ).reset_index(drop=True)
     annual_occ["fiscal_year"] = annual_occ["fiscal_year"].astype(str)
 
+    annual_occ["fiscal_year"] = annual_occ["fiscal_year"].astype(str)
+
+    # ========================================================
+    # OCCUPATIONAL MOBILITY DIAGNOSTICS
+    # ========================================================
+
+    mobility_sources = build_mobility_sources(
+        annual_occ=annual_occ,
+        mobility_data=mobility_data,
+        supply_data=supply_data,
+        provincial_cops=provincial_cops,
+        noc_titles=noc_titles,
+    )
+
+    valid_peak = annual_occ.dropna(
+        subset=["employment_change_pct"]
+    ).copy()
+
     valid_peak = annual_occ.dropna(subset=["employment_change_pct"]).copy()
 
     if valid_peak.empty:
@@ -1295,6 +1721,7 @@ def run_timeline_scenario(
         "peak_occupation": peak_occ,
         "cops_peak_occupation": cops_peak_occ,
         "project_occupation": project_occ,
+        "mobility_sources": mobility_sources,
         "fiscal_order": fiscal_order,
     }
 
@@ -1454,11 +1881,6 @@ def make_provincial_cops(cops_data, supply_data):
             provincial_cops,
             canada_cops,
         ],
-        ignore_index=True,
-        sort=False,
-    )
-    return pd.concat(
-        [provincial_cops, canada_cops],
         ignore_index=True,
         sort=False,
     )
@@ -1694,6 +2116,7 @@ try:
         noc_titles,
         vacancies,
         raw_cops,
+        raw_mobility,
         raw_canada_multipliers,
     ) = load_data()
 
@@ -1716,6 +2139,9 @@ try:
     cops_data = prepare_cops(raw_cops)
     canada_multipliers = prepare_canada_multipliers(
         raw_canada_multipliers
+    )
+    mobility_data = prepare_mobility(
+        raw_mobility
     )
     (
         industry_data,
@@ -1815,6 +2241,10 @@ with st.expander("Method and interpretation"):
 - **Canada benchmark** uses official Canada-level all-provinces multipliers and occupational/labour-market aggregates constructed from the ten provincial source files.
 - Canada has no separate "within province" multiplier. CA rows always use the official all-provinces multiplier values.
 - The Canada benchmark excludes the territories from the aggregated employment, unemployment, wage, vacancy, demographic, and occupational-share inputs.
+- Historical mobility benchmarks apply empirical U.S. occupation-transition rates to Canadian or provincial source-occupation employment.
+- Mobility benchmarks describe the scale of historically observed transitions and are not forecasts of workers available to projects.
+- Canadian skill distance is used as a separate structural-similarity indicator.
+- Potential source occupations may themselves face COPS pressure; LAMP therefore reports source labour-market conditions rather than treating all historical mobility as available capacity.
         """
     )
 
@@ -1880,7 +2310,41 @@ province_labels = {
     "CA": "Canada benchmark (10-province labour context)",
 }
 
+lamp_mobility_nocs = set(
+    occ_data["NOC3DIG"]
+    .dropna()
+    .astype(str)
+    .str.strip()
+)
 
+mobility_origin_nocs = set(
+    mobility_data["origin_NOC3DIG"]
+    .dropna()
+    .astype(str)
+)
+
+mobility_destination_nocs = set(
+    mobility_data["destination_NOC3DIG"]
+    .dropna()
+    .astype(str)
+)
+
+missing_mobility_destinations = sorted(
+    lamp_mobility_nocs
+    - mobility_destination_nocs
+)
+
+if not missing_mobility_destinations:
+    st.sidebar.success(
+        "LAMP-mobility occupation matching passed."
+    )
+else:
+    st.sidebar.warning(
+        f"{len(missing_mobility_destinations):,} LAMP occupations "
+        "have no mobility destination data: "
+        + ", ".join(missing_mobility_destinations)
+    )
+    
 # ============================================================
 # MODE SELECTOR
 # ============================================================
@@ -2251,7 +2715,6 @@ if scenario_mode == "Static scenario":
 # ============================================================
 
 if scenario_mode == "Project timeline":
-    st.sidebar.subheader("Saved plans")
 
     st.sidebar.subheader("Project plans")
 
@@ -2464,6 +2927,7 @@ if scenario_mode == "Project timeline":
                     supply_data=supply_data,
                     noc_titles=noc_titles,
                     provincial_cops=provincial_cops,
+                    mobility_data=mobility_data,
                     geography=timeline_geography,
                 )
             except Exception as exc:
@@ -2528,11 +2992,12 @@ if scenario_mode == "Project timeline":
                 )
 
 
-            overview_tab, peak_tab, cops_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
+            overview_tab, peak_tab, cops_tab, mobility_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
                 [
                     "Annual overview",
                     "Peak occupational pressures",
                     "COPS labour balance",
+                    "Potential worker sources",
                     "Occupation over time",
                     "Project contributions",
                     "Downloads",
@@ -2896,22 +3361,22 @@ if scenario_mode == "Project timeline":
                             key="cops_year_selector",
                     )
 
-                    chart_data = (
-                        cops_view.loc[
-                            cops_view["fiscal_year"].eq(selected_cops_year)
-                            & cops_view["post_project_balance"].notna()
-                        ]
-                        .nsmallest(
-                            15,
-                            "post_project_balance",
+                        chart_data = (
+                            cops_view.loc[
+                                cops_view["fiscal_year"].eq(selected_cops_year)
+                                & cops_view["post_project_balance"].notna()
+                            ]
+                            .nsmallest(
+                                15,
+                                "post_project_balance",
                             )
-                        .copy()
-                    )
+                            .copy()
+                        )
 
-                    chart_data["total_demand_with_lamp"] = (
-                        chart_data["total_baseline_openings"]
-                        + chart_data["new_jobs"]
-                    )
+                        chart_data["total_demand_with_lamp"] = (
+                            chart_data["total_baseline_openings"]
+                            + chart_data["new_jobs"]
+                        )
 
                     if chart_data.empty:
 
@@ -2939,6 +3404,7 @@ if scenario_mode == "Project timeline":
                             "NOC3DIG",
                             "title",
                             "fiscal_year",
+                            "total_inflows",
                             "total_baseline_openings",
                             "new_jobs",
                             "total_demand_with_lamp",
@@ -3042,6 +3508,465 @@ if scenario_mode == "Project timeline":
                         balance_chart,
                         width="stretch",
                     )
+                    
+            with mobility_tab:
+                mobility_view = timeline_results[
+                    "mobility_sources"
+                ].copy()
+
+                st.subheader(
+                    "Potential sources of occupational mobility"
+                )
+
+                st.caption(
+                    "Historical mobility benchmarks apply empirical U.S. "
+                    "occupation-transition rates to the Canadian or provincial "
+                    "source-occupation workforce. These values indicate the "
+                    "scale of historically observed mobility and are not "
+                    "forecasts of workers available to a project. Canadian "
+                    "skill distance provides a separate measure of occupational "
+                    "similarity."
+                )
+
+                if mobility_view.empty:
+                    st.info(
+                        "No occupational mobility relationships are available "
+                        "for this scenario."
+                    )
+
+                else:
+                
+                # --------------------------------------------
+                # Destination selector
+                # --------------------------------------------
+
+                    destination_options = (
+                        mobility_view[
+                            [
+                                "destination_NOC3DIG",
+                                "destination_title",
+                            ]
+                        ]
+                        .drop_duplicates()
+                        .copy()
+                    )
+
+                    destination_options["display_name"] = (
+                        "NOC "
+                        + destination_options[
+                            "destination_NOC3DIG"
+                            ].astype(str)
+                        + " | "
+                        + destination_options[
+                            "destination_title"
+                            ].fillna("Unknown occupation")
+                    )
+
+                    destination_options = (
+                        destination_options
+                        .sort_values("display_name")
+                        .reset_index(drop=True)
+                    )
+
+                    selected_destination_name = st.selectbox(
+                        "Destination occupation",
+                        destination_options["display_name"].tolist(),
+                        key="mobility_destination_selector",
+                    )
+
+                    selected_destination = (
+                        destination_options.loc[
+                            destination_options[
+                                "display_name"
+                            ].eq(selected_destination_name),
+                            "destination_NOC3DIG",
+                        ]
+                        .iloc[0]
+                    )
+
+                    destination_data = mobility_view.loc[
+                        mobility_view[
+                            "destination_NOC3DIG"
+                        ].eq(selected_destination)
+                    ].copy()
+
+                # --------------------------------------------
+                # Geography selector
+                #
+                # This matters if a timeline contains projects
+                # in more than one geography.
+                # --------------------------------------------
+
+                    available_mobility_geographies = (
+                        destination_data["PROV"]
+                        .dropna()
+                        .drop_duplicates()
+                        .tolist()
+                    )
+
+                    selected_mobility_geography = st.selectbox(
+                        "Geography",
+                        available_mobility_geographies,
+                        format_func=lambda code: province_labels.get(
+                            code,
+                            code,
+                        ),
+                        key="mobility_geography_selector",
+                    )
+
+                    destination_data = destination_data.loc[
+                        destination_data["PROV"].eq(
+                            selected_mobility_geography
+                        )
+                    ].copy()
+
+                # --------------------------------------------
+                # Fiscal-year selector
+                # --------------------------------------------
+
+                    available_mobility_years = [
+                        fy for fy in fiscal_order
+                        if fy in destination_data[
+                                "fiscal_year"
+                            ].dropna().unique().tolist()
+                    ]
+
+                    if not available_mobility_years:
+                        available_mobility_years = (
+                            destination_data["fiscal_year"]
+                            .dropna()
+                            .drop_duplicates()
+                            .tolist()
+                        )
+
+                    selected_mobility_year = st.selectbox(
+                        "Fiscal year",
+                        available_mobility_years,
+                        key="mobility_year_selector",
+                    )
+
+                    destination_data = destination_data.loc[
+                        destination_data["fiscal_year"].eq(
+                            selected_mobility_year
+                        )
+                    ].copy()
+
+                    if destination_data.empty:
+                        st.info(
+                            "No mobility results are available for the "
+                            "selected occupation, geography, and fiscal year."
+                        )
+
+                    else:
+                    # ----------------------------------------
+                    # Destination metrics
+                    # ----------------------------------------
+
+                        lamp_requirement = (
+                            destination_data["lamp_demand"]
+                            .dropna()
+                        )
+
+                        destination_gap = (
+                            destination_data[
+                                "destination_post_project_gap"
+                            ]
+                            .dropna()
+                        )
+
+                        destination_balance = (
+                            destination_data[
+                                "destination_post_project_balance"
+                                ]
+                        .dropna()
+                    )
+
+                        m1, m2, m3 = st.columns(3)
+
+                        if not lamp_requirement.empty:
+                            m1.metric(
+                                "LAMP direct demand",
+                                f"{lamp_requirement.iloc[0]:,.0f}",
+                            )
+                        else:
+                            m1.metric(
+                                "LAMP direct demand",
+                                "Unavailable",
+                            )
+
+                        if not destination_balance.empty:
+                            m2.metric(
+                                "Balance with projects",
+                                f"{destination_balance.iloc[0]:,.0f}",
+                            )
+                        else:
+                            m2.metric(
+                                "Balance with projects",
+                                "COPS unavailable",
+                            )
+
+                        if not destination_gap.empty:
+                            m3.metric(
+                                "Potential labour gap",
+                                f"{destination_gap.iloc[0]:,.0f}",
+                            )
+                        else:
+                            m3.metric(
+                                "Potential labour gap",
+                                "COPS unavailable",
+                            )
+
+                    # ----------------------------------------
+                    # Filters
+                    # ----------------------------------------
+
+                        source_filter_options = [
+                            "All sources",
+                            "Strong potential source",
+                            "Empirically observed",
+                            "Skill-compatible",
+                        ]
+
+                        selected_source_class = st.selectbox(
+                            "Source classification",
+                            source_filter_options,
+                            key="mobility_class_filter",
+                        )
+
+                        if selected_source_class != "All sources":
+                            destination_data = destination_data.loc[
+                                destination_data[
+                                    "mobility_class"
+                                    ].eq(selected_source_class)
+                            ].copy()
+                            
+                    # ----------------------------------------
+                    # Source table
+                    # ----------------------------------------
+
+                        source_display = (
+                            destination_data[
+                                [
+                                    "origin_NOC3DIG",
+                                    "origin_title",
+                                    "origin_employed",
+                                    "historical_between3_transition_rate",
+                                    "lamp_destination_share",
+                                    "historical_mobility_benchmark",
+                                    "skill_distance",
+                                    "skill_closeness_percentile_origin",
+                                    "empirical_source_percentile",
+                                    "mobility_class",
+                                    "origin_post_project_balance",
+                                    "origin_post_project_gap_pct",
+                                    "source_condition",
+                                ]
+                            ]
+                        .dropna(
+                            subset=["origin_NOC3DIG"]
+                        )
+                            .sort_values(
+                                [
+                                    "historical_mobility_benchmark",
+                                    "empirical_source_percentile",
+                                    ],
+                                ascending=[False, False],
+                            )
+                        )
+
+                        st.dataframe(
+                            source_display,
+                            hide_index=True,
+                            width="stretch",
+                            column_config={
+                                "origin_NOC3DIG": "Source NOC",
+                                "origin_title": "Source occupation",
+
+                                "origin_employed":
+                                    st.column_config.NumberColumn(
+                                        "Source employment",
+                                        format="%,.0f",
+                                    ),
+
+                                "historical_between3_transition_rate":
+                                    st.column_config.NumberColumn(
+                                        "Historical transition rate",
+                                        format="%.4f",
+                                    ),
+
+                                "lamp_destination_share":
+                                    st.column_config.NumberColumn(
+                                        "Share of source switchers",
+                                        format="%.3f",
+                                    ),
+
+                                "historical_mobility_benchmark":
+                                    st.column_config.NumberColumn(
+                                        "Historical mobility benchmark",
+                                        format="%,.0f",
+                                    ),
+
+                                "skill_distance":
+                                    st.column_config.NumberColumn(
+                                        "Skill distance",
+                                        format="%.2f",
+                                    ),
+
+                                "skill_closeness_percentile_origin":
+                                    st.column_config.NumberColumn(
+                                        "Skill closeness percentile",
+                                        format="%.1f",
+                                    ),
+
+                                "empirical_source_percentile":
+                                    st.column_config.NumberColumn(
+                                        "Empirical source percentile",
+                                        format="%.1f",
+                                    ),
+
+                                "mobility_class":
+                                    "Mobility classification",
+                                
+                                "origin_post_project_balance":
+                                    st.column_config.NumberColumn(
+                                        "Source COPS balance",
+                                        format="%,.0f",
+                                    ),
+
+                                "origin_post_project_gap_pct":
+                                    st.column_config.NumberColumn(
+                                        "Source gap / workforce (%)",
+                                        format="%.2f",
+                                    ),
+
+                                "source_condition":
+                                    "Source labour-market condition",
+                                },
+                            )
+
+                    # ----------------------------------------
+                    # Top-source chart
+                    # ----------------------------------------
+
+                        chart_sources = (
+                            source_display
+                            .dropna(
+                                subset=[
+                                    "historical_mobility_benchmark"
+                                ]
+                            )
+                            .nlargest(
+                                15,
+                                "historical_mobility_benchmark",
+                            )
+                        .copy()
+                    )
+
+                        chart_sources["label"] = (
+                            "NOC "
+                            + chart_sources[
+                                "origin_NOC3DIG"
+                            ].astype(str)
+                            + " | "
+                            + chart_sources[
+                                "origin_title"
+                            ].fillna("Unknown occupation")
+                        )
+
+                        if chart_sources.empty:
+                            st.info(
+                                "No source occupations have a calculable "
+                                "historical mobility benchmark."
+                            )
+
+                        else:
+                            mobility_chart = (
+                                alt.Chart(chart_sources)
+                                .mark_bar()
+                                .encode(
+                                    x=alt.X(
+                                        "historical_mobility_benchmark:Q",
+                                        title=(
+                                            "Historical mobility benchmark "
+                                            "(workers)"
+                                        ),
+                                    ),
+
+                                    y=alt.Y(
+                                        "label:N",
+                                        sort="-x",
+                                        title=None,
+                                        axis=alt.Axis(
+                                            labelLimit=550
+                                        ),
+                                    ),
+
+                                    color=alt.Color(
+                                        "mobility_class:N",
+                                        title="Classification",
+                                    ),
+
+                                    tooltip=[
+                                        alt.Tooltip(
+                                            "origin_NOC3DIG:N",
+                                            title="Source NOC",
+                                        ),
+
+                                        alt.Tooltip(
+                                            "origin_title:N",
+                                            title="Source occupation",
+                                        ),
+
+                                        alt.Tooltip(
+                                            "historical_between3_transition_rate:Q",
+                                            title=(
+                                                "Historical transition rate"
+                                            ),
+                                            format=".4f",
+                                        ),
+
+                                        alt.Tooltip(
+                                            "historical_mobility_benchmark:Q",
+                                            title="Mobility benchmark",
+                                            format=",.0f",
+                                        ),
+
+                                        alt.Tooltip(
+                                            "skill_distance:Q",
+                                            title="Skill distance",
+                                            format=".2f",
+                                        ),
+
+                                        alt.Tooltip(
+                                            "skill_closeness_percentile_origin:Q",
+                                            title=(
+                                                "Skill closeness percentile"
+                                            ),
+                                            format=".1f",
+                                    ),
+
+                                        alt.Tooltip(
+                                            "origin_post_project_balance:Q",
+                                            title="Source COPS balance",
+                                            format=",.0f",
+                                        ),
+
+                                        alt.Tooltip(
+                                            "source_condition:N",
+                                            title=(
+                                                "Source labour-market condition"
+                                            ),
+                                        ),
+                                    ],
+                                )
+                                .properties(height=500)
+                            )
+
+                            st.altair_chart(
+                                mobility_chart,
+                                width="stretch",
+                            )
+            
             with occupation_time_tab:
                 annual_occ = timeline_results["annual_occupation"].copy()
                 annual_occ["display_name"] = (
@@ -3246,6 +4171,8 @@ if scenario_mode == "Project timeline":
                         "COPS balance peaks": timeline_results["cops_peak_occupation"],
                         "Industry by project": timeline_results["industry_by_project"],
                         "Occupation by project": timeline_results["occupation_by_project"],
+                        "Mobility sources": timeline_results["mobility_sources"],
+                        "Mobility benchmark": mobility_data,
                         "Provincial and CA COPS": provincial_cops,
                         "Canada multipliers": canada_multipliers,
                     }
