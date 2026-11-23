@@ -1364,6 +1364,288 @@ def build_mobility_sources(
 
     return sources
 
+def simulate_mobility_recruitment(
+    mobility_rows,
+    response_rate,
+    pathway_rule,
+    capacity_rule,
+):
+    """
+    Simulate potential project-induced occupational recruitment.
+
+    Parameters
+    ----------
+    mobility_rows:
+        Mobility-source rows for one destination occupation,
+        geography, and fiscal year.
+
+    response_rate:
+        Assumed fraction of the historical mobility benchmark
+        induced by project demand. Expressed from 0 to 1.
+
+    pathway_rule:
+        One of:
+        - "Strong sources only"
+        - "Strong + mobility-supported"
+        - "All non-weak pathways"
+        - "All pathways"
+
+    capacity_rule:
+        One of:
+        - "COPS-surplus capped"
+        - "Non-deficit origins"
+        - "Unrestricted"
+
+    Returns
+    -------
+    source_results:
+        Source-level scenario results.
+
+    summary:
+        Dictionary of destination-level results.
+    """
+
+    source_results = mobility_rows.copy()
+
+    if source_results.empty:
+        return source_results, {
+            "lamp_demand": 0,
+            "eligible_historical_benchmark": 0,
+            "potential_induced_reallocation": 0,
+            "actual_induced_reallocation": 0,
+            "remaining_requirement": 0,
+            "share_of_demand_met_pct": 0,
+        }
+
+    # --------------------------------------------------------
+    # Destination demand
+    # --------------------------------------------------------
+
+    lamp_demand_values = (
+        source_results["lamp_demand"]
+        .dropna()
+        .unique()
+    )
+
+    if len(lamp_demand_values) == 0:
+        lamp_demand = 0.0
+    else:
+        lamp_demand = float(lamp_demand_values[0])
+
+    # --------------------------------------------------------
+    # Eligible mobility pathways
+    # --------------------------------------------------------
+
+    if pathway_rule == "Strong sources only":
+        source_results["pathway_eligible"] = (
+            source_results["mobility_class"]
+            .eq("Strong potential source")
+        )
+
+    elif pathway_rule == "Strong + mobility-supported":
+        source_results["pathway_eligible"] = (
+            source_results["mobility_class"].isin(
+                [
+                    "Strong potential source",
+                    "Empirically observed",
+                ]
+            )
+        )
+
+    elif pathway_rule == "All non-weak pathways":
+        source_results["pathway_eligible"] = (
+            source_results["mobility_class"].isin(
+                [
+                    "Strong potential source",
+                    "Empirically observed",
+                    "Skill-compatible",
+                ]
+            )
+        )
+
+    elif pathway_rule == "All pathways":
+        source_results["pathway_eligible"] = True
+
+    else:
+        raise ValueError(
+            f"Unknown pathway rule: {pathway_rule}"
+        )
+
+    # --------------------------------------------------------
+    # COPS source eligibility
+    # --------------------------------------------------------
+
+    source_results["source_surplus"] = (
+        source_results["origin_post_project_balance"]
+        .clip(lower=0)
+    )
+
+    if capacity_rule == "COPS-surplus capped":
+
+        # A source must have a positive projected COPS balance.
+        source_results["capacity_eligible"] = (
+            source_results["origin_post_project_balance"]
+            .gt(0)
+        )
+
+    elif capacity_rule == "Non-deficit origins":
+
+        # Zero-balance occupations remain eligible, but occupations
+        # with a projected deficit are excluded.
+        source_results["capacity_eligible"] = (
+            source_results["origin_post_project_balance"]
+            .ge(0)
+        )
+
+    elif capacity_rule == "Unrestricted":
+
+        # All occupations are eligible, including those with missing
+        # COPS projections or projected deficits.
+        source_results["capacity_eligible"] = True
+
+    else:
+        raise ValueError(
+            f"Unknown capacity rule: {capacity_rule}"
+        )
+
+    source_results["eligible_source"] = (
+        source_results["pathway_eligible"]
+        & source_results["capacity_eligible"]
+        & source_results[
+            "historical_mobility_benchmark"
+        ].notna()
+    )
+
+    # --------------------------------------------------------
+    # Apply the induced-mobility assumption
+    # --------------------------------------------------------
+
+    source_results["assumed_response_rate"] = (
+        response_rate
+    )
+
+    source_results["uncapped_induced_reallocation"] = np.where(
+        source_results["eligible_source"],
+        source_results["historical_mobility_benchmark"]
+        * response_rate,
+        0.0,
+    )
+
+    # --------------------------------------------------------
+    # Apply source-capacity constraints
+    # --------------------------------------------------------
+
+    if capacity_rule == "COPS-surplus capped":
+
+        source_results["source_capacity"] = (
+            source_results["source_surplus"]
+        )
+
+        source_results["potential_induced_reallocation"] = np.minimum(
+            source_results["uncapped_induced_reallocation"],
+            source_results["source_capacity"],
+        )
+
+    else:
+
+        source_results["source_capacity"] = np.nan
+
+        source_results["potential_induced_reallocation"] = (
+            source_results["uncapped_induced_reallocation"]
+        )
+
+    # --------------------------------------------------------
+    # Destination-demand cap
+    #
+    # If potential reallocation exceeds project demand, scale all
+    # eligible sources proportionally so the total cannot exceed
+    # the number of positions being filled.
+    # --------------------------------------------------------
+
+    total_potential = (
+        source_results[
+            "potential_induced_reallocation"
+        ].sum()
+    )
+
+    if total_potential > 0 and lamp_demand >= 0:
+
+        destination_scaling_factor = min(
+            1.0,
+            lamp_demand / total_potential,
+        )
+
+    else:
+        destination_scaling_factor = 0.0
+
+    source_results["destination_scaling_factor"] = (
+        destination_scaling_factor
+    )
+
+    source_results["actual_induced_reallocation"] = (
+        source_results["potential_induced_reallocation"]
+        * destination_scaling_factor
+    )
+
+    # --------------------------------------------------------
+    # Source balance after simulated recruitment
+    # --------------------------------------------------------
+
+    source_results["source_balance_after_recruitment"] = (
+        source_results["origin_post_project_balance"]
+        - source_results["actual_induced_reallocation"]
+    )
+
+    source_results["source_deficit_after_recruitment"] = (
+        -source_results["source_balance_after_recruitment"]
+    ).clip(lower=0)
+
+    # --------------------------------------------------------
+    # Summary
+    # --------------------------------------------------------
+
+    eligible_historical_benchmark = (
+        source_results.loc[
+            source_results["eligible_source"],
+            "historical_mobility_benchmark",
+        ].sum()
+    )
+
+    actual_reallocation = (
+        source_results[
+            "actual_induced_reallocation"
+        ].sum()
+    )
+
+    remaining_requirement = max(
+        lamp_demand - actual_reallocation,
+        0,
+    )
+
+    share_met_pct = (
+        actual_reallocation / lamp_demand * 100
+        if lamp_demand > 0
+        else 0
+    )
+
+    summary = {
+        "lamp_demand": lamp_demand,
+        "eligible_historical_benchmark":
+            eligible_historical_benchmark,
+        "potential_induced_reallocation":
+            total_potential,
+        "actual_induced_reallocation":
+            actual_reallocation,
+        "remaining_requirement":
+            remaining_requirement,
+        "share_of_demand_met_pct":
+            share_met_pct,
+        "destination_scaling_factor":
+            destination_scaling_factor,
+    }
+
+    return source_results, summary
+
 # ============================================================
 # TIMELINE / PROJECT PIPELINE ENGINE
 # ============================================================
@@ -2992,12 +3274,13 @@ if scenario_mode == "Project timeline":
                 )
 
 
-            overview_tab, peak_tab, cops_tab, mobility_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
+            overview_tab, peak_tab, cops_tab, mobility_tab, mobility_scenario_tab, occupation_time_tab, projects_tab, timeline_download_tab = st.tabs(
                 [
                     "Annual overview",
                     "Peak occupational pressures",
                     "COPS labour balance",
                     "Potential worker sources",
+                    "Mobility scenarios",
                     "Occupation over time",
                     "Project contributions",
                     "Downloads",
@@ -3966,6 +4249,602 @@ if scenario_mode == "Project timeline":
                                 mobility_chart,
                                 width="stretch",
                             )
+
+            with mobility_scenario_tab:
+                scenario_mobility = timeline_results[
+                    "mobility_sources"
+                ].copy()
+
+                st.subheader(
+                    "Occupational mobility scenarios"
+                )
+
+                st.caption(
+                    "This scenario applies a user-selected response rate "
+                    "to the historical occupational-mobility benchmark. "
+                    "The resulting values are illustrative potential "
+                    "reallocation, not forecasts of how many workers will "
+                    "change occupation."
+                )
+
+                if scenario_mobility.empty:
+                    st.info(
+                        "No occupational mobility relationships are "
+                        "available for this scenario."
+                    )
+
+                else:
+                    # --------------------------------------------
+                    # Destination occupation selector
+                    # --------------------------------------------
+
+                    scenario_destinations = (
+                        scenario_mobility[
+                            [
+                                "destination_NOC3DIG",
+                                "destination_title",
+                            ]
+                        ]
+                        .drop_duplicates()
+                        .copy()
+                    )
+
+                    scenario_destinations["display_name"] = (
+                        "NOC "
+                        + scenario_destinations[
+                            "destination_NOC3DIG"
+                        ].astype(str)
+                        + " | "
+                        + scenario_destinations[
+                            "destination_title"
+                        ].fillna("Unknown occupation")
+                    )
+
+                    scenario_destinations = (
+                        scenario_destinations
+                        .sort_values("display_name")
+                        .reset_index(drop=True)
+                    )
+
+                    selected_scenario_destination_name = (
+                        st.selectbox(
+                            "Destination occupation",
+                            scenario_destinations[
+                                "display_name"
+                            ].tolist(),
+                            key=(
+                                "mobility_scenario_"
+                                "destination_selector"
+                            ),
+                        )
+                    )
+
+                    selected_scenario_destination = (
+                        scenario_destinations.loc[
+                            scenario_destinations[
+                                "display_name"
+                            ].eq(
+                                selected_scenario_destination_name
+                            ),
+                            "destination_NOC3DIG",
+                        ]
+                        .iloc[0]
+                    )
+
+                    scenario_destination_data = (
+                        scenario_mobility.loc[
+                            scenario_mobility[
+                                "destination_NOC3DIG"
+                            ].eq(
+                                selected_scenario_destination
+                            )
+                        ]
+                        .copy()
+                    )
+
+                    # --------------------------------------------
+                    # Geography selector
+                    # --------------------------------------------
+
+                    scenario_geographies = (
+                        scenario_destination_data["PROV"]
+                        .dropna()
+                        .drop_duplicates()
+                        .tolist()
+                    )
+
+                    selected_scenario_geography = st.selectbox(
+                        "Geography",
+                        scenario_geographies,
+                        format_func=lambda code:
+                            province_labels.get(
+                                code,
+                                code,
+                            ),
+                        key=(
+                            "mobility_scenario_"
+                            "geography_selector"
+                        ),
+                    )
+
+                    scenario_destination_data = (
+                        scenario_destination_data.loc[
+                            scenario_destination_data[
+                                "PROV"
+                            ].eq(
+                                selected_scenario_geography
+                            )
+                        ]
+                        .copy()
+                    )
+
+                    # --------------------------------------------
+                    # Fiscal-year selector
+                    # --------------------------------------------
+
+                    scenario_years = [
+                        fiscal_year
+                        for fiscal_year in fiscal_order
+                        if fiscal_year
+                        in scenario_destination_data[
+                            "fiscal_year"
+                        ]
+                        .dropna()
+                        .unique()
+                        .tolist()
+                    ]
+
+                    if not scenario_years:
+                        scenario_years = (
+                            scenario_destination_data[
+                                "fiscal_year"
+                            ]
+                            .dropna()
+                            .drop_duplicates()
+                            .tolist()
+                        )
+
+                    selected_scenario_year = st.selectbox(
+                        "Fiscal year",
+                        scenario_years,
+                        key=(
+                            "mobility_scenario_"
+                            "year_selector"
+                        ),
+                    )
+
+                    scenario_destination_data = (
+                        scenario_destination_data.loc[
+                            scenario_destination_data[
+                                "fiscal_year"
+                            ].eq(
+                                selected_scenario_year
+                            )
+                        ]
+                        .copy()
+                    )
+
+                    st.divider()
+
+                    # --------------------------------------------
+                    # Scenario assumptions
+                    # --------------------------------------------
+
+                    st.markdown(
+                        "#### Scenario assumptions"
+                    )
+
+                    assumption_col1, assumption_col2 = (
+                        st.columns(2)
+                    )
+
+                    with assumption_col1:
+                        pathway_rule = st.selectbox(
+                            "Eligible mobility pathways",
+                            [
+                                "Strong sources only",
+                                (
+                                    "Strong + "
+                                    "mobility-supported"
+                                ),
+                                "All non-weak pathways",
+                                "All pathways",
+                            ],
+                            index=0,
+                            key=(
+                                "mobility_scenario_"
+                                "pathway_rule"
+                            ),
+                        )
+
+                    with assumption_col2:
+                        capacity_rule = st.selectbox(
+                            "Source-capacity rule",
+                            [
+                                "COPS-surplus capped",
+                                "Non-deficit origins",
+                                "Unrestricted",
+                            ],
+                            index=0,
+                            key=(
+                                "mobility_scenario_"
+                                "capacity_rule"
+                            ),
+                        )
+
+                    mobility_response_pct = st.slider(
+                        "Induced occupational mobility response",
+                        min_value=0,
+                        max_value=100,
+                        value=25,
+                        step=5,
+                        format="%d%%",
+                        key=(
+                            "mobility_scenario_"
+                            "response_rate"
+                        ),
+                    )
+
+                    st.caption(
+                        "The response assumption represents the "
+                        "share of the historical mobility benchmark "
+                        "assumed to be induced by project demand. "
+                        "The default 25% is illustrative and is not "
+                        "an estimated Canadian behavioural parameter."
+                    )
+
+                    response_rate = (
+                        mobility_response_pct / 100
+                    )
+
+                    # --------------------------------------------
+                    # Run the scenario
+                    # --------------------------------------------
+
+                    (
+                        mobility_scenario_results,
+                        mobility_scenario_summary,
+                    ) = simulate_mobility_recruitment(
+                        mobility_rows=(
+                            scenario_destination_data
+                        ),
+                        response_rate=response_rate,
+                        pathway_rule=pathway_rule,
+                        capacity_rule=capacity_rule,
+                    )
+
+                    # --------------------------------------------
+                    # Summary metrics
+                    # --------------------------------------------
+
+                    st.markdown(
+                        "#### Scenario results"
+                    )
+
+                    scenario_metrics = st.columns(5)
+
+                    scenario_metrics[0].metric(
+                        "LAMP direct demand",
+                        (
+                            f"{mobility_scenario_summary['lamp_demand']:,.0f}"
+                        ),
+                    )
+
+                    scenario_metrics[1].metric(
+                        "Eligible historical benchmark",
+                        (
+                            f"{mobility_scenario_summary['eligible_historical_benchmark']:,.0f}"
+                        ),
+                    )
+
+                    scenario_metrics[2].metric(
+                        "Potential reallocation",
+                        (
+                            f"{mobility_scenario_summary['actual_induced_reallocation']:,.0f}"
+                        ),
+                    )
+
+                    scenario_metrics[3].metric(
+                        "Share of demand met",
+                        (
+                            f"{mobility_scenario_summary['share_of_demand_met_pct']:.1f}%"
+                        ),
+                    )
+
+                    scenario_metrics[4].metric(
+                        "Remaining requirement",
+                        (
+                            f"{mobility_scenario_summary['remaining_requirement']:,.0f}"
+                        ),
+                    )
+
+                    # --------------------------------------------
+                    # Interpretation
+                    # --------------------------------------------
+
+                    if (
+                        mobility_scenario_summary[
+                            "actual_induced_reallocation"
+                        ]
+                        >= mobility_scenario_summary[
+                            "lamp_demand"
+                        ]
+                        and mobility_scenario_summary[
+                            "lamp_demand"
+                        ]
+                        > 0
+                    ):
+                        st.success(
+                            "Under these assumptions, potential "
+                            "occupational reallocation is sufficient "
+                            "to cover the selected destination's "
+                            "LAMP demand. This does not mean the "
+                            "workers will necessarily move."
+                        )
+
+                    elif (
+                        mobility_scenario_summary[
+                            "actual_induced_reallocation"
+                        ]
+                        > 0
+                    ):
+                        st.info(
+                            "Under these assumptions, occupational "
+                            "mobility could meet approximately "
+                            f"{mobility_scenario_summary['share_of_demand_met_pct']:.1f}% "
+                            "of LAMP demand. The remaining requirement "
+                            "would need to be met through other labour-"
+                            "supply channels or remain unfilled."
+                        )
+
+                    else:
+                        st.warning(
+                            "No induced occupational reallocation is "
+                            "available under the selected assumptions."
+                        )
+
+                    # --------------------------------------------
+                    # Source-level table
+                    # --------------------------------------------
+
+                    scenario_source_display = (
+                        mobility_scenario_results.loc[
+                            mobility_scenario_results[
+                                "eligible_source"
+                            ].eq(True)
+                        ]
+                        [
+                            [
+                                "origin_NOC3DIG",
+                                "origin_title",
+                                "mobility_class",
+                                "source_condition",
+                                "origin_employed",
+                                "historical_between3_transition_rate",
+                                "historical_mobility_benchmark",
+                                "origin_post_project_balance",
+                                "source_capacity",
+                                "uncapped_induced_reallocation",
+                                "actual_induced_reallocation",
+                                "source_balance_after_recruitment",
+                            ]
+                        ]
+                        .sort_values(
+                            "actual_induced_reallocation",
+                            ascending=False,
+                        )
+                    )
+
+                    if scenario_source_display.empty:
+                        st.info(
+                            "No source occupations satisfy the "
+                            "selected pathway and capacity rules."
+                        )
+
+                    else:
+                        st.dataframe(
+                            scenario_source_display,
+                            hide_index=True,
+                            width="stretch",
+                            column_config={
+                                "origin_NOC3DIG":
+                                    "Source NOC",
+
+                                "origin_title":
+                                    "Source occupation",
+
+                                "mobility_class":
+                                    "Mobility classification",
+
+                                "source_condition":
+                                    "Initial source condition",
+
+                                "origin_employed":
+                                    st.column_config.NumberColumn(
+                                        "Source employment",
+                                        format="%,.0f",
+                                    ),
+
+                                "historical_between3_transition_rate":
+                                    st.column_config.NumberColumn(
+                                        "Historical transition rate",
+                                        format="%.4f",
+                                    ),
+
+                                "historical_mobility_benchmark":
+                                    st.column_config.NumberColumn(
+                                        "Historical benchmark",
+                                        format="%,.0f",
+                                    ),
+
+                                "origin_post_project_balance":
+                                    st.column_config.NumberColumn(
+                                        "Initial COPS balance",
+                                        format="%,.0f",
+                                    ),
+
+                                "source_capacity":
+                                    st.column_config.NumberColumn(
+                                        "Source capacity",
+                                        format="%,.0f",
+                                    ),
+
+                                "uncapped_induced_reallocation":
+                                    st.column_config.NumberColumn(
+                                        "Response before caps",
+                                        format="%,.1f",
+                                    ),
+
+                                "actual_induced_reallocation":
+                                    st.column_config.NumberColumn(
+                                        "Simulated reallocation",
+                                        format="%,.1f",
+                                    ),
+
+                                "source_balance_after_recruitment":
+                                    st.column_config.NumberColumn(
+                                        "Balance after recruitment",
+                                        format="%,.1f",
+                                    ),
+                            },
+                        )
+
+                        # ----------------------------------------
+                        # Source-contribution chart
+                        # ----------------------------------------
+
+                        scenario_chart_data = (
+                            scenario_source_display.loc[
+                                scenario_source_display[
+                                    "actual_induced_reallocation"
+                                ].gt(0)
+                            ]
+                            .nlargest(
+                                15,
+                                "actual_induced_reallocation",
+                            )
+                            .copy()
+                        )
+
+                        scenario_chart_data["label"] = (
+                            "NOC "
+                            + scenario_chart_data[
+                                "origin_NOC3DIG"
+                            ].astype(str)
+                            + " | "
+                            + scenario_chart_data[
+                                "origin_title"
+                            ].fillna(
+                                "Unknown occupation"
+                            )
+                        )
+
+                        if not scenario_chart_data.empty:
+                            scenario_chart = (
+                                alt.Chart(
+                                    scenario_chart_data
+                                )
+                                .mark_bar()
+                                .encode(
+                                    x=alt.X(
+                                        (
+                                            "actual_induced_"
+                                            "reallocation:Q"
+                                        ),
+                                        title=(
+                                            "Potential induced "
+                                            "occupational "
+                                            "reallocation"
+                                        ),
+                                    ),
+
+                                    y=alt.Y(
+                                        "label:N",
+                                        sort="-x",
+                                        title=None,
+                                        axis=alt.Axis(
+                                            labelLimit=550
+                                        ),
+                                    ),
+
+                                    color=alt.Color(
+                                        "mobility_class:N",
+                                        title=(
+                                            "Mobility "
+                                            "classification"
+                                        ),
+                                    ),
+
+                                    tooltip=[
+                                        alt.Tooltip(
+                                            "origin_NOC3DIG:N",
+                                            title="Source NOC",
+                                        ),
+
+                                        alt.Tooltip(
+                                            "origin_title:N",
+                                            title=(
+                                                "Source occupation"
+                                            ),
+                                        ),
+
+                                        alt.Tooltip(
+                                            (
+                                                "historical_"
+                                                "mobility_benchmark:Q"
+                                            ),
+                                            title=(
+                                                "Historical "
+                                                "benchmark"
+                                            ),
+                                            format=",.0f",
+                                        ),
+
+                                        alt.Tooltip(
+                                            (
+                                                "actual_induced_"
+                                                "reallocation:Q"
+                                            ),
+                                            title=(
+                                                "Simulated "
+                                                "reallocation"
+                                            ),
+                                            format=",.1f",
+                                        ),
+
+                                        alt.Tooltip(
+                                            (
+                                                "origin_post_"
+                                                "project_balance:Q"
+                                            ),
+                                            title=(
+                                                "Initial COPS "
+                                                "balance"
+                                            ),
+                                            format=",.0f",
+                                        ),
+
+                                        alt.Tooltip(
+                                            (
+                                                "source_balance_"
+                                                "after_recruitment:Q"
+                                            ),
+                                            title=(
+                                                "Balance after "
+                                                "recruitment"
+                                            ),
+                                            format=",.1f",
+                                        ),
+                                    ],
+                                )
+                                .properties(height=500)
+                            )
+
+                            st.altair_chart(
+                                scenario_chart,
+                                width="stretch",
+                            )
+
             
             with occupation_time_tab:
                 annual_occ = timeline_results["annual_occupation"].copy()
