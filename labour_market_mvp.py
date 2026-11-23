@@ -3722,9 +3722,9 @@ if scenario_mode == "Project timeline":
 
                         source_filter_options = [
                             "All sources",
-                            "Strong potential source",
-                            "Empirically observed",
-                            "Skill-compatible",
+                            "High evidence",
+                            "Mobility supported",
+                            "Skill supported",
                         ]
 
                         selected_source_class = st.selectbox(
@@ -3791,13 +3791,13 @@ if scenario_mode == "Project timeline":
                                 "historical_between3_transition_rate":
                                     st.column_config.NumberColumn(
                                         "Historical transition rate",
-                                        format="%.4f",
+                                        format=".2%",
                                     ),
 
                                 "lamp_destination_share":
                                     st.column_config.NumberColumn(
                                         "Share of source switchers",
-                                        format="%.3f",
+                                        format=".3%",
                                     ),
 
                                 "historical_mobility_benchmark":
@@ -3815,7 +3815,7 @@ if scenario_mode == "Project timeline":
                                 "skill_closeness_percentile_origin":
                                     st.column_config.NumberColumn(
                                         "Skill closeness percentile",
-                                        format="%.1f",
+                                        format="%.0f",
                                     ),
 
                                 "empirical_source_percentile":
@@ -3922,7 +3922,7 @@ if scenario_mode == "Project timeline":
                                             title=(
                                                 "Historical transition rate"
                                             ),
-                                            format=".4f",
+                                            format=".2%",
                                         ),
 
                                         alt.Tooltip(
