@@ -3791,13 +3791,13 @@ if scenario_mode == "Project timeline":
                                 "historical_between3_transition_rate":
                                     st.column_config.NumberColumn(
                                         "Historical transition rate",
-                                        format=".2%",
+                                        format="%.4f",
                                     ),
 
                                 "lamp_destination_share":
                                     st.column_config.NumberColumn(
                                         "Share of source switchers",
-                                        format=".3%",
+                                        format="%.3f",
                                     ),
 
                                 "historical_mobility_benchmark":
@@ -3815,7 +3815,7 @@ if scenario_mode == "Project timeline":
                                 "skill_closeness_percentile_origin":
                                     st.column_config.NumberColumn(
                                         "Skill closeness percentile",
-                                        format="%.0f",
+                                        format="%.1f",
                                     ),
 
                                 "empirical_source_percentile":
