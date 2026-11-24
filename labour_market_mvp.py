@@ -5041,26 +5041,87 @@ if scenario_mode == "Project timeline":
                 )
 
             with timeline_download_tab:
-                timeline_workbook = to_excel_bytes(
-                    {
-                        "Timeline inputs": timeline_results["timeline_inputs"],
-                        "Annual industry": timeline_results["annual_industry"],
-                        "Annual occupations": timeline_results["annual_occupation"],
-                        "Peak occupations": timeline_results["peak_occupation"],
-                        "COPS balance peaks": timeline_results["cops_peak_occupation"],
-                        "Industry by project": timeline_results["industry_by_project"],
-                        "Occupation by project": timeline_results["occupation_by_project"],
-                        "Mobility sources": timeline_results["mobility_sources"],
-                        "Mobility benchmark": mobility_data,
-                        "Provincial and CA COPS": provincial_cops,
-                        "Canada multipliers": canada_multipliers,
-                    }
+            
+                st.subheader("Download results")
+            
+                st.caption(
+                    "Generate the Excel workbook when you are ready to download. "
+                    "Large mobility scenarios can take a few seconds to export."
                 )
-
-                st.download_button(
-                    "Download complete timeline results (.xlsx)",
-                    timeline_workbook,
-                    "lamp_project_timeline_results.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    width="stretch",
-                )
+            
+                if st.button(
+                    "Prepare Excel download",
+                    key="prepare_timeline_download",
+                    type="primary",
+                ):
+            
+                    with st.spinner(
+                        "Preparing workbook..."
+                    ):
+            
+                        timeline_workbook = to_excel_bytes(
+                            {
+                                "Timeline inputs":
+                                    timeline_results["timeline_inputs"],
+            
+                                "Annual industry":
+                                    timeline_results["annual_industry"],
+            
+                                "Annual occupations":
+                                    timeline_results["annual_occupation"],
+            
+                                "Peak occupations":
+                                    timeline_results["peak_occupation"],
+            
+                                "COPS balance peaks":
+                                    timeline_results[
+                                        "cops_peak_occupation"
+                                    ],
+            
+                                "Industry by project":
+                                    timeline_results[
+                                        "industry_by_project"
+                                    ],
+            
+                                "Occupation by project":
+                                    timeline_results[
+                                        "occupation_by_project"
+                                    ],
+            
+                                "Mobility sources":
+                                    timeline_results[
+                                        "mobility_sources"
+                                    ],
+            
+                                "Mobility benchmark":
+                                    mobility_data,
+            
+                                "Provincial and CA COPS":
+                                    provincial_cops,
+            
+                                "Canada multipliers":
+                                    canada_multipliers,
+                            }
+                        )
+            
+                        st.session_state[
+                            "timeline_download_bytes"
+                        ] = timeline_workbook
+            
+                if (
+                    "timeline_download_bytes"
+                    in st.session_state
+                ):
+            
+                    st.download_button(
+                        "Download complete timeline results (.xlsx)",
+                        st.session_state[
+                            "timeline_download_bytes"
+                        ],
+                        "lamp_project_timeline_results.xlsx",
+                        (
+                            "application/vnd.openxmlformats-officedocument."
+                            "spreadsheetml.sheet"
+                        ),
+                        width="stretch",
+                    )
